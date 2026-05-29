@@ -2,7 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Content Studio">
+<meta name="theme-color" content="#1c1c1e">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%231c1c1e'/><text y='68' x='50' text-anchor='middle' font-size='55' font-family='system-ui' fill='white'>CS</text></svg>">
+<link rel="manifest" href="data:application/json,{&quot;name&quot;:&quot;Content Studio&quot;,&quot;short_name&quot;:&quot;Studio&quot;,&quot;start_url&quot;:&quot;./content-studio.html&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;%231c1c1e&quot;,&quot;theme_color&quot;:&quot;%231c1c1e&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%231c1c1e'/><text y='68' x='50' text-anchor='middle' font-size='55' font-family='system-ui' fill='white'>CS</text></svg>&quot;,&quot;sizes&quot;:&quot;any&quot;,&quot;type&quot;:&quot;image/svg+xml&quot;}]}">
 <title>Content Studio</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -47,6 +53,25 @@ input,select,textarea{font-family:system-ui;font-size:12px;color:#1a1a1a;}
 .sync-indicator{display:flex;align-items:center;gap:5px;font-size:11px;color:#22c55e;font-family:monospace;}
 .sync-indicator.syncing{color:#3b82f6;}
 .sync-indicator.error{color:#ef4444;}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .app{flex-direction:column;height:100vh;}
+  .sidebar{width:100%;height:auto;flex-direction:row;flex-wrap:wrap;overflow:visible;flex-shrink:0;}
+  .sidebar-mobile-hidden{display:none;}
+  .main{flex:1;overflow:hidden;min-height:0;}
+  .mobile-nav{display:flex!important;}
+  .desktop-only{display:none!important;}
+  .card{border-radius:8px;padding:10px;}
+  .grid4{grid-template-columns:repeat(2,1fr)!important;}
+  .grid3{grid-template-columns:repeat(2,1fr)!important;}
+  .grid2{grid-template-columns:1fr!important;}
+  .topbar{padding:8px 12px!important;}
+}
+@media (min-width: 769px) {
+  .mobile-nav{display:none!important;}
+  .mobile-only{display:none!important;}
+}
 </style>
 </head>
 <body>
@@ -64,6 +89,7 @@ const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googlea
 let state = {
   tab: "library",
   model: "all",
+  sidebarOpen: false,
   token: null,
   tokenExpiry: null,
   syncing: false,
@@ -97,7 +123,6 @@ let state = {
     {id:"f2d",  name:"tennis",       parentId:"f2",   sfwNsfw:"SFW",  driveId:null},
     {id:"f3",   name:"Body",         parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
     {id:"f4",   name:"Location",     parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
-    {id:"f4a",  name:"balcony",      parentId:"f4",   sfwNsfw:"SFW",  driveId:null},
     {id:"f5",   name:"Seasonal",     parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
     {id:"f6",   name:"Filler",       parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
     {id:"f6a",  name:"pickleball",   parentId:"f6",   sfwNsfw:"SFW",  driveId:null},
@@ -791,7 +816,8 @@ function renderEmptyState(title, sub, actionLabel, onAction) {
 
 // ── SIDEBAR ───────────────────────────────────────────────────────────────────
 function renderSidebar() {
-  const side = el("div", {class:"sidebar"});
+  const isMobile = window.innerWidth <= 768;
+  const side = el("div", {class:"sidebar", style:isMobile?{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:200,transform:state.sidebarOpen?"translateX(0)":"translateX(-100%)",transition:"transform 0.25s ease"}:{}});
 
   // Logo
   const logo = div("", {padding:"16px 12px 12px",borderBottom:"1px solid rgba(255,255,255,0.08)"});
@@ -1091,7 +1117,7 @@ function renderLibrary() {
   if (filtered.length === 0) {
     contentArea.appendChild(renderEmptyState("No content here", "Upload your first piece of content.", "Upload", () => setState({showUpload:true})));
   } else {
-    const grid = div("", {display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:"10px"});
+    const grid = div("", {display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:"10px"});
     filtered.forEach(c => {
       const igP = c.posts.filter(p=>state.accounts.find(a=>a.id===p.accountId)?.platform==="Instagram");
       const ttP = c.posts.filter(p=>state.accounts.find(a=>a.id===p.accountId)?.platform==="TikTok");
@@ -2205,8 +2231,20 @@ function renderApp() {
 
   const main = div("main",{});
 
+  // Mobile overlay when sidebar open
+  if (window.innerWidth <= 768 && state.sidebarOpen) {
+    const overlay = div("",{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:199});
+    overlay.addEventListener("click",()=>setState({sidebarOpen:false}));
+    app.appendChild(overlay);
+  }
+
   // Topbar
   const topbar = div("topbar",{});
+
+  // Hamburger for mobile
+  const hamburger = el("button",{class:"mobile-nav",style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"20px",color:"#1a1a1a",padding:"4px 8px",marginRight:"8px"}},"☰");
+  hamburger.addEventListener("click",()=>setState({sidebarOpen:!state.sidebarOpen}));
+  topbar.appendChild(hamburger);
   const tabTitles = {library:"Content Library",draft:"Draft Post",calendar:"Calendar",metrics:"Metrics"};
   const titleWrap = div("",{});
   titleWrap.appendChild(el("div",{style:{fontSize:"15px",fontWeight:600,color:"#1a1a1a"}},tabTitles[state.tab]||""));
@@ -2237,8 +2275,47 @@ function renderApp() {
   if (state.showAddAccount)   app.appendChild(renderAddAccountModal());
   if (state.showUpload)       app.appendChild(renderUploadModal());
 
+  // Mobile bottom nav
+  if (window.innerWidth <= 768) {
+    const bottomNav = div("",{
+      position:"fixed",bottom:0,left:0,right:0,
+      background:"#fff",borderTop:"1px solid #f0f0f0",
+      display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom)"
+    });
+    [
+      {id:"library",  label:"Library",  icon:"[lib]"},
+      {id:"draft",    label:"Draft",    icon:"[+]"},
+      {id:"calendar", label:"Calendar", icon:"[cal]"},
+      {id:"metrics",  label:"Metrics",  icon:"[m]"},
+    ].forEach(t=>{
+      const isActive = state.tab===t.id;
+      const btn = el("button",{style:{
+        flex:1,padding:"10px 4px 8px",border:"none",background:"transparent",
+        cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:"2px",
+        color:isActive?"#1c1c1e":"#9ca3af",fontWeight:isActive?"600":"400"
+      }});
+      btn.appendChild(el("span",{style:{fontSize:"18px"}},t.icon));
+      btn.appendChild(el("span",{style:{fontSize:"10px"}},t.label));
+      btn.addEventListener("click",()=>setState({tab:t.id,sidebarOpen:false}));
+      bottomNav.appendChild(btn);
+    });
+    app.appendChild(bottomNav);
+
+    // Add padding to main content so bottom nav doesn't overlap
+    main.style.paddingBottom = "65px";
+  }
+
   return app;
 }
+
+// ── PWA INSTALL ───────────────────────────────────────────────────────────────
+let deferredInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", e => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  // Show install button if available
+  setTimeout(render, 500);
+});
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 // Restore token from localStorage if still valid
@@ -2252,6 +2329,7 @@ function renderApp() {
 })();
 checkAuthCallback();
 render();
+window.addEventListener("resize", () => render());
 // Don't auto-load - user clicks Load manually to avoid stale data overriding app state
 </script>
 </body>
