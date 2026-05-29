@@ -1440,21 +1440,42 @@ function renderDraft() {
   const allOpt = el("option",{value:"all"},"All Folders");
   folderSel.appendChild(allOpt);
   const sfwFilterId = pickerSfw==="SFW"?"sfw":pickerSfw==="NSFW"?"nsfw":null;
-  const folderOptionsFiltered = [...state.folders].filter(f=>{
-    if (f.id==="sfw"||f.id==="nsfw") return false;
-    if (!sfwFilterId) return true;
-    // Check if folder is under the selected SFW/NSFW section
-    let cur = f;
-    while (cur) {
-      if (cur.parentId===sfwFilterId) return true;
-      if (cur.id===sfwFilterId) return true;
-      cur = state.folders.find(x=>x.id===cur.parentId);
+
+  // Build ordered folder list matching content library hierarchy
+  function getOrderedFolders() {
+    const result = [];
+    function walk(parentId, depth) {
+      const children = state.folders.filter(f=>f.parentId===parentId&&f.id!=="sfw"&&f.id!=="nsfw").sort((a,b)=>a.name.localeCompare(b.name));
+      children.forEach(f=>{
+        // Filter by SFW/NSFW if selected
+        if (sfwFilterId) {
+          // Check ancestry
+          let cur = f;
+          let underFilter = false;
+          while (cur) {
+            if (cur.parentId===sfwFilterId||cur.id===sfwFilterId) { underFilter=true; break; }
+            cur = state.folders.find(x=>x.id===cur.parentId);
+          }
+          if (!underFilter) { walk(f.id, depth+1); return; }
+        }
+        result.push({folder:f, depth});
+        walk(f.id, depth+1);
+      });
     }
-    return false;
-  }).sort((a,b)=>folderPath(a.id,state.folders).localeCompare(folderPath(b.id,state.folders)));
-  folderOptionsFiltered.forEach(folder=>{
-    const opt = el("option",{value:folder.id},folderPath(folder.id,state.folders));
-    if (folder.id===pickerFolder) opt.selected=true;
+    // Walk SFW children first, then NSFW, then root folders
+    if (!sfwFilterId || sfwFilterId==="sfw") walk("sfw", 0);
+    if (!sfwFilterId || sfwFilterId==="nsfw") walk("nsfw", 0);
+    // Root folders (no parent, not sfw/nsfw)
+    if (!sfwFilterId) walk(null, 0);
+    return result;
+  }
+
+  const folderOptionsFiltered = getOrderedFolders();
+  folderOptionsFiltered.forEach(({folder, depth})=>{
+    const folder_alias = folder;
+    const label = "--".repeat(depth) + (depth>0?" ":"") + folder_alias.name;
+    const opt = el("option",{value:folder_alias.id},label);
+    if (folder_alias.id===pickerFolder) opt.selected=true;
     folderSel.appendChild(opt);
   });
   if (pickerFolder==="all") allOpt.selected=true;
