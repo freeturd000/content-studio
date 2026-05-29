@@ -948,7 +948,7 @@ function renderUploadModal() {
 
       // Find model folder in Drive
       const modelFiles = await driveListFolder(MODELS_FOLDER_ID);
-      const modelDriveFolder = modelFiles.find(f=>f.name.toLowerCase().includes(modelName.toLowerCase().replace(/\s+/g,"")||modelName.toLowerCase()));
+      const modelDriveFolder = modelFiles.find(f=>f.name.toLowerCase().includes(modelName.toLowerCase()));
 
       if (!modelDriveFolder) { statusEl.textContent="Model folder not found in Drive. Create it first."; upBtn.textContent="Upload to Drive"; upBtn.disabled=false; return; }
 
