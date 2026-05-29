@@ -492,11 +492,19 @@ async function scanDrive(modelId) {
           if (catFolder.mimeType !== "application/vnd.google-apps.folder") continue;
 
           // Find or create matching app folder
-          const catFolderName = catFolder.name.replace(/^[0-9]+\s*-\s*/,"").trim();
-          let appCatFolder = state.folders.find(f=>f.name.toLowerCase()===catFolderName.toLowerCase()&&f.sfwNsfw===sfwNsfw);
+          const catFolderName = catFolder.name.replace(/^[0-9]+\s*-\s*/,"").trim().toLowerCase();
+          // Match against SFW/NSFW children only
+          const sfwNsfwFolder = state.folders.find(f=>f.id===sfwNsfw.toLowerCase());
+          const sfwNsfwId = sfwNsfwFolder?.id || sfwNsfw.toLowerCase();
+          let appCatFolder = state.folders.find(f=>f.parentId===sfwNsfwId&&f.name.toLowerCase()===catFolderName);
           if (!appCatFolder) {
-            // Try partial match
-            appCatFolder = state.folders.find(f=>f.sfwNsfw===sfwNsfw&&!f.parentId&&(f.name.toLowerCase().includes(catFolderName.toLowerCase())||catFolderName.toLowerCase().includes(f.name.toLowerCase())));
+            appCatFolder = state.folders.find(f=>f.parentId===sfwNsfwId&&(f.name.toLowerCase().includes(catFolderName)||catFolderName.includes(f.name.toLowerCase())));
+          }
+          if (!appCatFolder) {
+            // Create it
+            const newCatId = "f"+Date.now()+Math.random().toString(36).slice(2,4);
+            appCatFolder = {id:newCatId,name:catFolderName,parentId:sfwNsfwId,sfwNsfw,driveId:catFolder.id};
+            state.folders.push(appCatFolder);
           }
 
           // Get subfolders
@@ -525,13 +533,14 @@ async function scanDrive(modelId) {
                 if (file.mimeType==="application/vnd.google-apps.folder") continue;
                 if (existingDriveIds.has(file.id)) continue;
                 const fileDetails = await fetch("https://www.googleapis.com/drive/v3/files/"+file.id+"?fields=id,name,webViewLink,thumbnailLink",{headers:{Authorization:"Bearer "+state.token}}).then(r=>r.json());
-                // Determine best folder ID from filename e.g. LillyRose_selfie_bathroom_0001
-                const parts = file.name.replace(/\.[^.]+$/,"").split("_");
+                // Parse filename: LillyRose_selfie_bathroom_0001 -> sub=bathroom
+                const nameParts = file.name.replace(/\.[^.]+$/,"").split("_");
                 let bestFolderId = appSubFolder?.id||appCatFolder?.id||"f1";
-                if (parts.length >= 3) {
-                  const subName = parts[2].toLowerCase();
+                if (nameParts.length >= 3) {
+                  const subName = nameParts[2].toLowerCase();
                   const matchedSub = state.folders.find(f=>f.name.toLowerCase()===subName&&f.parentId===appCatFolder?.id);
                   if (matchedSub) bestFolderId = matchedSub.id;
+                  else if (appSubFolder) bestFolderId = appSubFolder.id;
                 }
                 newContent.push({
                   id:"c"+Date.now()+Math.random().toString(36).slice(2,8),
@@ -1000,11 +1009,16 @@ function renderLibrary() {
     const updatedContent = state.content.map(c => {
       const parts = c.label.replace(/\.[^.]+$/,"").split("_");
       if (parts.length < 3) return c;
-      const catName = parts[1].toLowerCase();
-      const subName = parts[2].toLowerCase();
-      const catFolder = state.folders.find(f=>f.name.toLowerCase()===catName&&!f.parentId||f.name.toLowerCase()===catName);
-      const subFolder = catFolder ? state.folders.find(f=>f.name.toLowerCase()===subName&&f.parentId===catFolder.id) : null;
-      if (subFolder && subFolder.id !== c.folderId) { fixed++; return {...c, folderId:subFolder.id}; }
+      const catName = parts[1].toLowerCase();   // e.g. selfie, lifestyle, filler
+      const subName = parts[2].toLowerCase();   // e.g. bathroom, pickleball, night
+      // Find category folder under SFW or NSFW
+      const sfwId = c.sfwNsfw==="NSFW" ? "nsfw" : "sfw";
+      const catFolder = state.folders.find(f=>f.parentId===sfwId&&f.name.toLowerCase()===catName)
+                     || state.folders.find(f=>f.parentId===sfwId&&f.name.toLowerCase().includes(catName));
+      const subFolder = catFolder ? (state.folders.find(f=>f.parentId===catFolder.id&&f.name.toLowerCase()===subName)
+                     || state.folders.find(f=>f.parentId===catFolder.id&&f.name.toLowerCase().includes(subName))) : null;
+      const targetId = subFolder?.id || catFolder?.id;
+      if (targetId && targetId !== c.folderId) { fixed++; return {...c, folderId:targetId}; }
       return c;
     });
     setState({content:updatedContent});
@@ -1076,14 +1090,17 @@ function renderLibrary() {
       thumb.style.background = thumbColors[c.icon]||"#f3f4f6";
       if (c.thumbnailUrl) {
         const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover",position:"absolute",top:0,left:0}});
-        img.src = c.thumbnailUrl;
-        img.onerror = ()=>{ img.style.display="none"; };
+        const thumbSrc = c.thumbnailUrl ? c.thumbnailUrl.replace(/=s[0-9]+$/,"=s400") : "";
+        img.src = thumbSrc;
+        img.crossOrigin = "anonymous";
+        img.onerror = ()=>{ img.style.display="none"; thumb.appendChild(document.createTextNode("Photo")); };
         thumb.appendChild(img);
       } else {
         thumb.appendChild(txt(thumbLabels[c.icon]||"File"));
       }
       card.appendChild(thumb);
-      // No type/path label - just filename and badges
+      const cardPath = folderPath(c.folderId, state.folders);
+      if (cardPath) card.appendChild(el("div", {style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"3px"}}, cardPath));
       card.appendChild(el("div", {style:{fontSize:"12px",fontWeight:500,lineHeight:1.3,marginBottom:"8px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}, c.label));
 
       const pills = div("", {display:"flex",flexDirection:"column",gap:"3px"});
@@ -1114,8 +1131,8 @@ function renderLibrary() {
     const thumbP = div("", {width:"100%",aspectRatio:"9/12",borderRadius:"10px",background:"#f8f8f7",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px",color:"#9ca3af",marginBottom:"12px",overflow:"hidden",position:"relative"});
     if (sel.thumbnailUrl) {
       const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover",position:"absolute",top:0,left:0}});
-      img.src = sel.thumbnailUrl;
-      img.onerror = ()=>{ img.style.display="none"; thumbP.appendChild(txt("Image")); };
+      img.src = sel.thumbnailUrl ? sel.thumbnailUrl.replace(/=s[0-9]+$/,"=s400") : sel.thumbnailUrl;
+      img.onerror = ()=>{ img.style.display="none"; thumbP.appendChild(document.createTextNode("Photo")); };
       thumbP.appendChild(img);
     } else {
       thumbP.appendChild(txt("Image"));
@@ -2114,10 +2131,7 @@ function renderApp() {
 })();
 checkAuthCallback();
 render();
-// Auto-load if already authenticated
-if (isAuthenticated()) {
-  setTimeout(() => loadFromSheets(), 500);
-}
+// Don't auto-load - user clicks Load manually to avoid stale data overriding app state
 </script>
 </body>
 </html>
