@@ -80,15 +80,29 @@ let state = {
     {id:"tt-2",    handle:"@lillsrosey",   platform:"TikTok",   sub:"TikTok 2", color:"#555",   followers:1800,status:"inactive",modelId:"lilly"},
   ],
   folders: [
-    {id:"f1", name:"Selfie",       parentId:null,driveId:null},
-    {id:"f1a",name:"Bathroom",     parentId:"f1",driveId:null},
-    {id:"f1b",name:"Bedroom",      parentId:"f1",driveId:null},
-    {id:"f1c",name:"Car",          parentId:"f1",driveId:null},
-    {id:"f2", name:"Lifestyle",    parentId:null,driveId:null},
-    {id:"f2a",name:"Beach",        parentId:"f2",driveId:null},
-    {id:"f2b",name:"Pool",         parentId:"f2",driveId:null},
-    {id:"f3", name:"TikTok Quotes",parentId:null,driveId:null},
-    {id:"f4", name:"Carousels",    parentId:null,driveId:null},
+    {id:"sfw",  name:"SFW",          parentId:null, sfwNsfw:"SFW",  driveId:null, locked:true},
+    {id:"nsfw", name:"NSFW",         parentId:null, sfwNsfw:"NSFW", driveId:null, locked:true},
+    {id:"f1",   name:"Selfie",       parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
+    {id:"f1a",  name:"bathroom",     parentId:"f1",   sfwNsfw:"SFW",  driveId:null},
+    {id:"f1b",  name:"bedroom",      parentId:"f1",   sfwNsfw:"SFW",  driveId:null},
+    {id:"f1c",  name:"car",          parentId:"f1",   sfwNsfw:"SFW",  driveId:null},
+    {id:"f1d",  name:"couch",        parentId:"f1",   sfwNsfw:"SFW",  driveId:null},
+    {id:"f1e",  name:"gym",          parentId:"f1",   sfwNsfw:"SFW",  driveId:null},
+    {id:"f1f",  name:"inside",       parentId:"f1",   sfwNsfw:"SFW",  driveId:null},
+    {id:"f1g",  name:"outside",      parentId:"f1",   sfwNsfw:"SFW",  driveId:null},
+    {id:"f2",   name:"Lifestyle",    parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
+    {id:"f2a",  name:"night",        parentId:"f2",   sfwNsfw:"SFW",  driveId:null},
+    {id:"f2b",  name:"pickleball",   parentId:"f2",   sfwNsfw:"SFW",  driveId:null},
+    {id:"f2c",  name:"restaurant",   parentId:"f2",   sfwNsfw:"SFW",  driveId:null},
+    {id:"f2d",  name:"tennis",       parentId:"f2",   sfwNsfw:"SFW",  driveId:null},
+    {id:"f3",   name:"Body",         parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
+    {id:"f4",   name:"Location",     parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
+    {id:"f4a",  name:"balcony",      parentId:"f4",   sfwNsfw:"SFW",  driveId:null},
+    {id:"f5",   name:"Seasonal",     parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
+    {id:"f6",   name:"Filler",       parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
+    {id:"f6a",  name:"pickleball",   parentId:"f6",   sfwNsfw:"SFW",  driveId:null},
+    {id:"f7",   name:"TikTok Quotes",parentId:null,   sfwNsfw:null,   driveId:null},
+    {id:"f8",   name:"Carousels",    parentId:null,   sfwNsfw:null,   driveId:null},
   ],
   content: [],
   drafts:  [],
@@ -265,7 +279,7 @@ async function loadFromSheets() {
     const platforms = platformsData.length ? platformsData.map(r => ({id:r[0],name:r[1],color:r[2]||"#888"})) : state.platforms;
     const postTypes = postTypesData.length ? postTypesData.map(r => ({id:r[0],name:r[1]})) : state.postTypes;
     const accounts  = accountsData.length  ? accountsData.map(r  => ({id:r[0],handle:r[1],platform:r[2],sub:r[3],color:r[4],followers:parseInt(r[5])||0,status:r[6],modelId:r[7]})) : state.accounts;
-    const folders   = foldersData.length   ? foldersData.map(r   => ({id:r[0],name:r[1],parentId:r[2]||null,driveId:r[3]||null})) : state.folders;
+    const folders   = foldersData.length   ? foldersData.map(r   => ({id:r[0],name:r[1],parentId:r[2]||null,sfwNsfw:r[3]||null,driveId:r[4]||null,locked:r[5]==='true'})) : state.folders;
 
     const postsMap = {};
     postsData.forEach(r => {
@@ -276,7 +290,8 @@ async function loadFromSheets() {
 
     const content = contentData.map(r => ({
       id:r[0], folderId:r[1], type:r[2], label:r[3], uploaded:r[4], icon:r[5]||"f",
-      modelId:r[6], driveId:r[7]||null, driveUrl:r[8]||null,
+      modelId:r[6], driveId:r[7]||null, driveUrl:r[8]||null, sfwNsfw:r[9]||null,
+      thumbnailUrl:r[10]||null,
       posts: postsMap[r[0]] || [],
     }));
 
@@ -313,10 +328,10 @@ async function saveToSheets() {
     if (state.accounts.length) await sheetsSet("Accounts!A2", state.accounts.map(a=>[a.id,a.handle,a.platform,a.sub,a.color,a.followers,a.status,a.modelId,"",""]));
 
     await sheetsClear("Folders!A2:D");
-    if (state.folders.length) await sheetsSet("Folders!A2", state.folders.map(f=>[f.id,f.name,f.parentId||"",f.driveId||""]));
+    if (state.folders.length) await sheetsSet("Folders!A2", state.folders.map(f=>[f.id,f.name,f.parentId||"",f.sfwNsfw||"",f.driveId||"",f.locked?'true':'']));
 
     await sheetsClear("Content!A2:I");
-    if (state.content.length) await sheetsSet("Content!A2", state.content.map(c=>[c.id,c.folderId,c.type,c.label,c.uploaded,c.icon,c.modelId,c.driveId||"",c.driveUrl||""]));
+    if (state.content.length) await sheetsSet("Content!A2", state.content.map(c=>[c.id,c.folderId,c.type,c.label,c.uploaded,c.icon,c.modelId,c.driveId||"",c.driveUrl||"",c.sfwNsfw||"",c.thumbnailUrl||""]));
 
     await sheetsClear("Posts!A2:H");
     const postRows = state.content.flatMap(c => c.posts.map(p=>[c.id,p.accountId,p.date,p.views,p.likes,p.comments,"",""]));
@@ -421,6 +436,160 @@ async function createModelInDrive(modelName) {
     console.error("Drive folder creation failed:", e);
     return null;
   }
+}
+
+// ── GET SFW/NSFW FOR FOLDER ──────────────────────────────────────────────────
+function getFolderSfwNsfw(folderId) {
+  let f = state.folders.find(x=>x.id===folderId);
+  while (f) {
+    if (f.sfwNsfw) return f.sfwNsfw;
+    if (!f.parentId) break;
+    f = state.folders.find(x=>x.id===f.parentId);
+  }
+  return "SFW";
+}
+
+// ── SCAN DRIVE ────────────────────────────────────────────────────────────────
+async function scanDrive(modelId) {
+  if (!isAuthenticated()) { alert("Connect Google first."); return; }
+  setState({syncing:true, syncError:null});
+  try {
+    const modelObj = state.models.find(m=>m.id===modelId);
+    if (!modelObj || modelObj.id==="all") { setState({syncing:false,syncError:"Select a specific model to scan."}); return; }
+    const modelName = modelObj.label;
+
+    // Find model folder in Drive
+    const modelFiles = await driveListFolder(MODELS_FOLDER_ID);
+    const modelDriveFolder = modelFiles.find(f=>f.name.toLowerCase().includes(modelName.toLowerCase()));
+    if (!modelDriveFolder) { setState({syncing:false,syncError:"Model folder not found in Drive: "+modelName}); return; }
+
+    // Get existing drive IDs so we dont re-import
+    const existingDriveIds = new Set(state.content.map(c=>c.driveId).filter(Boolean));
+    const newContent = [];
+
+    // Scan both SFW and NSFW
+    for (const sfwNsfw of ["SFW","NSFW"]) {
+      const sfwLabel = sfwNsfw==="SFW"?"01 - SFW":"02 - NSFW";
+      try {
+        // Navigate to 03 - Content > SFW/NSFW > 05 - Ready
+        const contentChildren = await driveListFolder(modelDriveFolder.id);
+        const contentFolder = contentChildren.find(f=>f.name==="03 - Content");
+        if (!contentFolder) continue;
+
+        const sfwChildren = await driveListFolder(contentFolder.id);
+        const sfwFolder = sfwChildren.find(f=>f.name===sfwLabel);
+        if (!sfwFolder) continue;
+
+        const readyChildren = await driveListFolder(sfwFolder.id);
+        const readyFolder = readyChildren.find(f=>f.name==="05 - Ready");
+        if (!readyFolder) continue;
+
+        // Get top-level folders in Ready (Selfie, Lifestyle, etc.)
+        const categoryFolders = await driveListFolder(readyFolder.id);
+
+        for (const catFolder of categoryFolders) {
+          if (catFolder.mimeType !== "application/vnd.google-apps.folder") continue;
+
+          // Find or create matching app folder
+          let appCatFolder = state.folders.find(f=>f.name.toLowerCase()===catFolder.name.toLowerCase().replace(/^\d+\s*-\s*/,"")&&f.sfwNsfw===sfwNsfw);
+          const catFolderName = catFolder.name.replace(/^\d+\s*-\s*/,"");
+
+          // Get subfolders
+          const subFolders = await driveListFolder(catFolder.id);
+          const hasSubFolders = subFolders.some(f=>f.mimeType==="application/vnd.google-apps.folder");
+
+          if (hasSubFolders) {
+            for (const subFolder of subFolders) {
+              if (subFolder.mimeType !== "application/vnd.google-apps.folder") continue;
+              const subFolderName = subFolder.name.replace(/^\d+\s*-\s*/,"");
+
+              // Find or create app subfolder
+              let appSubFolder = state.folders.find(f=>f.name.toLowerCase()===subFolderName.toLowerCase()&&f.parentId===appCatFolder?.id);
+              if (!appSubFolder && appCatFolder) {
+                appSubFolder = {id:"f"+Date.now()+Math.random().toString(36).slice(2,6),name:subFolderName,parentId:appCatFolder.id,sfwNsfw,driveId:subFolder.id};
+                state.folders.push(appSubFolder);
+              }
+
+              // Scan files in subfolder
+              const files = await driveListFolder(subFolder.id);
+              for (const file of files) {
+                if (file.mimeType==="application/vnd.google-apps.folder") continue;
+                if (existingDriveIds.has(file.id)) continue;
+                const fileDetails = await fetch("https://www.googleapis.com/drive/v3/files/"+file.id+"?fields=id,name,webViewLink,thumbnailLink",{headers:{Authorization:"Bearer "+state.token}}).then(r=>r.json());
+                newContent.push({
+                  id:"c"+Date.now()+Math.random().toString(36).slice(2,8),
+                  folderId:appSubFolder?.id||appCatFolder?.id||"f1",
+                  type:"Story", label:file.name,
+                  uploaded:new Date().toISOString().slice(0,10),
+                  icon:"f", modelId, sfwNsfw,
+                  driveId:file.id, driveUrl:fileDetails.webViewLink||"",
+                  thumbnailUrl:fileDetails.thumbnailLink||"",
+                  posts:[]
+                });
+                existingDriveIds.add(file.id);
+              }
+            }
+          } else {
+            // Files directly in category folder
+            for (const file of subFolders) {
+              if (file.mimeType==="application/vnd.google-apps.folder") continue;
+              if (existingDriveIds.has(file.id)) continue;
+              const fileDetails = await fetch("https://www.googleapis.com/drive/v3/files/"+file.id+"?fields=id,name,webViewLink,thumbnailLink",{headers:{Authorization:"Bearer "+state.token}}).then(r=>r.json());
+              newContent.push({
+                id:"c"+Date.now()+Math.random().toString(36).slice(2,8),
+                folderId:appCatFolder?.id||"f1",
+                type:"Story", label:file.name,
+                uploaded:new Date().toISOString().slice(0,10),
+                icon:"f", modelId, sfwNsfw,
+                driveId:file.id, driveUrl:fileDetails.webViewLink||"",
+                thumbnailUrl:fileDetails.thumbnailLink||"",
+                posts:[]
+              });
+              existingDriveIds.add(file.id);
+            }
+          }
+        }
+      } catch(e) { console.warn("Scan error for "+sfwNsfw+":", e); }
+    }
+
+    const updatedContent = [...state.content, ...newContent];
+    setState({content:updatedContent, syncing:false, lastSynced:new Date().toLocaleTimeString()});
+    if (newContent.length) { await saveToSheets(); alert("Imported "+newContent.length+" new file(s)."); }
+    else alert("No new files found.");
+  } catch(e) {
+    setState({syncing:false, syncError:e.message});
+  }
+}
+
+// ── CREATE DRIVE FOLDER FOR APP FOLDER ───────────────────────────────────────
+async function createDriveFolderForAppFolder(appFolder, modelId) {
+  if (!isAuthenticated()) return null;
+  try {
+    const modelObj = state.models.find(m=>m.id===modelId);
+    if (!modelObj || modelObj.id==="all") return null;
+    const modelFiles = await driveListFolder(MODELS_FOLDER_ID);
+    const modelDriveFolder = modelFiles.find(f=>f.name.toLowerCase().includes(modelObj.label.toLowerCase()));
+    if (!modelDriveFolder) return null;
+
+    const sfwNsfw = appFolder.sfwNsfw || getFolderSfwNsfw(appFolder.parentId);
+    const readyFolderId = await syncDriveFolders(modelDriveFolder.id, sfwNsfw);
+
+    // Find parent drive folder
+    let parentDriveId = readyFolderId;
+    if (appFolder.parentId && appFolder.parentId !== "sfw" && appFolder.parentId !== "nsfw") {
+      const parentAppFolder = state.folders.find(f=>f.id===appFolder.parentId);
+      if (parentAppFolder?.driveId) parentDriveId = parentAppFolder.driveId;
+      else {
+        // Try to find by name in ready folder
+        const readyContents = await driveListFolder(readyFolderId);
+        const match = readyContents.find(f=>f.name.toLowerCase().includes(parentAppFolder?.name.toLowerCase()||""));
+        if (match) parentDriveId = match.id;
+      }
+    }
+
+    const newDriveId = await driveCreateFolder(appFolder.name, parentDriveId);
+    return newDriveId;
+  } catch(e) { console.warn("createDriveFolderForAppFolder failed:", e); return null; }
 }
 
 // ── UPLOAD FILE ───────────────────────────────────────────────────────────────
@@ -677,32 +846,98 @@ function renderLibrary() {
   allBtn.addEventListener("click", () => setState({libraryFolder:"all"}));
   folderSide.appendChild(allBtn);
 
-  const roots = state.folders.filter(f=>!f.parentId);
-  roots.forEach(f => {
+  function renderFolderNode(f, depth) {
     const kids = state.folders.filter(x=>x.parentId===f.id);
     const isSel = state.libraryFolder===f.id;
-    const row = div("", {display:"flex",alignItems:"center"});
+    const isLocked = f.locked;
+    const indent = depth * 12;
+
+    const wrap = div("",{});
+    const row = div("",{display:"flex",alignItems:"center",gap:"2px"});
 
     if (kids.length) {
-      const tog = el("button", {style:{border:"none",background:"transparent",cursor:"pointer",color:"#6b7280",fontSize:"10px",padding:"0 2px",flexShrink:0,width:"14px"}}, f._expanded?"v":">");
-      tog.addEventListener("click", () => { f._expanded=!f._expanded; render(); });
+      const tog = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",color:"#6b7280",fontSize:"10px",padding:"0 2px",flexShrink:0,width:"14px"}}, f._expanded?"v":">");
+      tog.addEventListener("click",()=>{ f._expanded=!f._expanded; render(); });
       row.appendChild(tog);
+    } else {
+      row.appendChild(el("span",{style:{width:"14px",flexShrink:0}},""));
     }
 
-    const fBtn = el("button", {style:{display:"flex",alignItems:"center",flex:1,padding:"5px 6px",border:"none",borderRadius:"6px",background:isSel?"rgba(28,28,30,0.1)":"transparent",color:isSel?"#1c1c1e":"#6b7280",fontSize:"11px",cursor:"pointer",textAlign:"left",marginBottom:"1px",paddingLeft:kids.length?"6px":"18px"}}, f.name);
-    fBtn.addEventListener("click", () => setState({libraryFolder:f.id}));
+    const fBtn = el("button",{style:{display:"flex",alignItems:"center",flex:1,padding:"5px 4px",border:"none",borderRadius:"6px",background:isSel?"rgba(28,28,30,0.1)":"transparent",color:isLocked?"#374151":isSel?"#1c1c1e":"#6b7280",fontSize:isLocked?"12px":"11px",fontWeight:isLocked?"600":"400",cursor:"pointer",textAlign:"left",marginBottom:"1px",paddingLeft:(indent+4)+"px"}}, f.name);
+    fBtn.addEventListener("click",()=>setState({libraryFolder:f.id}));
     row.appendChild(fBtn);
-    folderSide.appendChild(row);
+
+    if (!isLocked) {
+      const gearBtn = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",color:"#9ca3af",fontSize:"10px",padding:"2px 4px",opacity:0,transition:"opacity 0.1s"}}, "...");
+      row.addEventListener("mouseenter",()=>gearBtn.style.opacity="1");
+      row.addEventListener("mouseleave",()=>gearBtn.style.opacity="0");
+      gearBtn.addEventListener("click",e=>{
+        e.stopPropagation();
+        const menu = div("",{position:"fixed",background:"#fff",border:"1px solid #e5e7eb",borderRadius:"8px",boxShadow:"0 4px 16px rgba(0,0,0,0.1)",zIndex:999,minWidth:"140px",padding:"4px"});
+        const rect = gearBtn.getBoundingClientRect();
+        menu.style.top = rect.bottom+4+"px";
+        menu.style.left = rect.left+"px";
+
+        const menuItems = [
+          {label:"Add subfolder", action:()=>{
+            const name = prompt("Subfolder name:");
+            if (!name) return;
+            const newF = {id:"f"+Date.now(),name,parentId:f.id,sfwNsfw:f.sfwNsfw,driveId:null};
+            state.folders.push(newF);
+            f._expanded = true;
+            if (isAuthenticated() && state.model!=="all") {
+              createDriveFolderForAppFolder(newF, state.model).then(driveId=>{
+                if(driveId){ newF.driveId=driveId; saveToSheets(); }
+              });
+            }
+            render();
+          }},
+          {label:"Rename", action:()=>{
+            const name = prompt("New name:", f.name);
+            if (!name) return;
+            setState({folders:state.folders.map(x=>x.id===f.id?{...x,name}:x)});
+          }},
+          {label:"Delete", action:()=>{
+            if (!confirm("Delete folder "+f.name+"? Content will move to parent.")) return;
+            const parentId = f.parentId;
+            setState({
+              folders:state.folders.filter(x=>x.id!==f.id),
+              content:state.content.map(c=>c.folderId===f.id?{...c,folderId:parentId}:c),
+              libraryFolder:state.libraryFolder===f.id?"all":state.libraryFolder
+            });
+          }},
+        ];
+
+        menuItems.forEach(item=>{
+          const btn = el("button",{style:{display:"block",width:"100%",padding:"6px 10px",border:"none",background:"transparent",cursor:"pointer",textAlign:"left",fontSize:"12px",color:"#374151",borderRadius:"6px"}}, item.label);
+          btn.addEventListener("mouseenter",()=>btn.style.background="#f3f4f6");
+          btn.addEventListener("mouseleave",()=>btn.style.background="transparent");
+          btn.addEventListener("click",()=>{ document.body.removeChild(menu); item.action(); });
+          menu.appendChild(btn);
+        });
+
+        document.body.appendChild(menu);
+        setTimeout(()=>{ const close=()=>{ if(document.body.contains(menu)) document.body.removeChild(menu); document.removeEventListener("click",close); }; document.addEventListener("click",close); },10);
+      });
+      row.appendChild(gearBtn);
+    }
+
+    wrap.appendChild(row);
 
     if (f._expanded) {
-      kids.forEach(kid => {
-        const isSel2 = state.libraryFolder===kid.id;
-        const kBtn = el("button", {style:{display:"flex",alignItems:"center",gap:"6px",width:"100%",padding:"4px 6px 4px 24px",border:"none",borderRadius:"6px",background:isSel2?"rgba(28,28,30,0.1)":"transparent",color:isSel2?"#1c1c1e":"#6b7280",fontSize:"11px",cursor:"pointer",textAlign:"left",marginBottom:"1px"}}, "- "+kid.name);
-        kBtn.addEventListener("click", () => setState({libraryFolder:kid.id}));
-        folderSide.appendChild(kBtn);
-      });
+      kids.forEach(kid=>wrap.appendChild(renderFolderNode(kid, depth+1)));
     }
-  });
+    return wrap;
+  }
+
+  // Render SFW, NSFW sections first, then non-sfwNsfw folders
+  const sfwSection = state.folders.find(f=>f.id==="sfw");
+  const nsfwSection = state.folders.find(f=>f.id==="nsfw");
+  const otherRoots = state.folders.filter(f=>!f.parentId && f.id!=="sfw" && f.id!=="nsfw");
+
+  if (sfwSection) { sfwSection._expanded = sfwSection._expanded !== false; folderSide.appendChild(renderFolderNode(sfwSection, 0)); }
+  if (nsfwSection) { if(nsfwSection._expanded===undefined) nsfwSection._expanded=false; folderSide.appendChild(renderFolderNode(nsfwSection, 0)); }
+  otherRoots.forEach(f=>{ folderSide.appendChild(renderFolderNode(f, 0)); });
 
   // Add folder
   const addFolderWrap = div("", {marginTop:"10px",borderTop:"1px solid #f0f0f0",paddingTop:"10px"});
@@ -738,6 +973,11 @@ function renderLibrary() {
   searchInp.addEventListener("input", e => setState({librarySearch:e.target.value}));
   toolbar.appendChild(searchInp);
 
+  const scanBtn = renderBtn("Scan Drive", false, () => {
+    if (state.model==="all") { alert("Select a specific model first."); return; }
+    scanDrive(state.model);
+  });
+  toolbar.appendChild(scanBtn);
   const uploadBtn = renderBtn("Upload", true, () => setState({showUpload:true}));
   toolbar.appendChild(uploadBtn);
   main.appendChild(toolbar);
@@ -745,10 +985,24 @@ function renderLibrary() {
   // Filter content
   const modelContent = state.model==="all" ? state.content : state.content.filter(c=>c.modelId===state.model);
   const getFolderIds = fid => { if(fid==="all") return null; const kids=state.folders.filter(f=>f.parentId===fid).map(f=>f.id); return [fid,...kids]; };
+  const sfwF = state.librarySfwFilter||"All";
   const filtered = modelContent.filter(c => {
     const fids = getFolderIds(state.libraryFolder);
-    return (!fids||fids.includes(c.folderId)) && (!state.librarySearch||c.label.toLowerCase().includes(state.librarySearch.toLowerCase()));
+    const fOk = !fids||fids.includes(c.folderId);
+    const sOk = !state.librarySearch||c.label.toLowerCase().includes(state.librarySearch.toLowerCase());
+    const sfwOk = sfwF==="All"||c.sfwNsfw===sfwF||(!c.sfwNsfw&&sfwF==="All");
+    return fOk&&sOk&&sfwOk;
   });
+
+  // SFW/NSFW filter
+  const sfwFilter = div("",{padding:"8px 16px 0",display:"flex",gap:"6px",flexShrink:0});
+  ["All","SFW","NSFW"].forEach(opt=>{
+    const active = (state.librarySfwFilter||"All")===opt;
+    const btn = el("button",{style:{padding:"4px 14px",borderRadius:"20px",border:"1px solid",borderColor:active?"#1c1c1e":"#e5e7eb",background:active?"#1c1c1e":"transparent",color:active?"#fff":"#6b7280",fontSize:"11px",cursor:"pointer",fontFamily:"monospace",fontWeight:active?"600":"400"}},opt);
+    btn.addEventListener("click",()=>setState({librarySfwFilter:opt}));
+    sfwFilter.appendChild(btn);
+  });
+  main.appendChild(sfwFilter);
 
   // Stats
   const statsRow = div("grid4", {padding:"12px 16px 0",flexShrink:0});
@@ -777,18 +1031,22 @@ function renderLibrary() {
         const badge = el("span", {style:{position:"absolute",top:"8px",right:"8px",fontSize:"9px",padding:"2px 6px",borderRadius:"20px",background:"#f0fdf4",color:"#15803d",fontWeight:600,fontFamily:"monospace"}}, "UNUSED");
         card.appendChild(badge);
       }
+      if (c.sfwNsfw) {
+        const sfwBadge = el("span",{style:{position:"absolute",top:"8px",left:"8px",fontSize:"9px",padding:"2px 6px",borderRadius:"20px",background:c.sfwNsfw==="SFW"?"#eff6ff":"#fef2f2",color:c.sfwNsfw==="SFW"?"#1d4ed8":"#b91c1c",fontWeight:600,fontFamily:"monospace"}}, c.sfwNsfw);
+        card.appendChild(sfwBadge);
+      }
 
-      const thumb = div("", {width:"100%",aspectRatio:"4/3",borderRadius:"8px",background:"#f8f8f7",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"11px",color:"#9ca3af",marginBottom:"8px",fontWeight:500});
+      const thumb = div("", {width:"100%",aspectRatio:"4/3",borderRadius:"8px",background:"#f8f8f7",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"11px",color:"#9ca3af",marginBottom:"8px",fontWeight:500,overflow:"hidden",position:"relative"});
       const thumbColors = {f:"#fce7f3",s:"#eff6ff",c:"#f0fdf4"};
       const thumbLabels = {f:"Photo",s:"Slide",c:"Carousel"};
       thumb.style.background = thumbColors[c.icon]||"#f3f4f6";
-      thumb.appendChild(txt(thumbLabels[c.icon]||"File"));
-      if (c.driveUrl) {
-        const img = el("img", {style:{width:"100%",height:"100%",objectFit:"cover",borderRadius:"8px"}});
-        img.src = c.driveUrl;
-        img.onerror = () => {};
-        thumb.innerHTML = "";
+      if (c.thumbnailUrl) {
+        const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover",position:"absolute",top:0,left:0}});
+        img.src = c.thumbnailUrl;
+        img.onerror = ()=>{ img.style.display="none"; };
         thumb.appendChild(img);
+      } else {
+        thumb.appendChild(txt(thumbLabels[c.icon]||"File"));
       }
       card.appendChild(thumb);
       card.appendChild(el("div", {style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"3px"}}, c.type.toUpperCase()+" - "+folderPath(c.folderId,state.folders)));
