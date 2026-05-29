@@ -2238,15 +2238,31 @@ function renderMobileApp() {
 
   // Top bar
   const topbar = el("div",{style:{background:"#1c1c1e",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,paddingTop:"env(safe-area-inset-top, 12px)"}});
-  topbar.appendChild(el("span",{style:{fontSize:"15px",fontWeight:600,color:"#fff"}},"Content Studio"));
-  const modelSel = el("select",{style:{background:"#2c2c2e",color:"#fff",border:"1px solid rgba(255,255,255,0.2)",borderRadius:"8px",padding:"5px 8px",fontSize:"12px",cursor:"pointer"}});
-  state.models.forEach(m=>{
-    const opt = el("option",{value:m.id},m.label);
-    if (m.id===state.model) opt.selected=true;
-    modelSel.appendChild(opt);
-  });
-  modelSel.addEventListener("change",e=>setState({model:e.target.value}));
-  topbar.appendChild(modelSel);
+  const titleWrap = el("div",{style:{display:"flex",flexDirection:"column"}});
+  titleWrap.appendChild(el("span",{style:{fontSize:"14px",fontWeight:600,color:"#fff"}},"Content Studio"));
+  if (isAuthenticated()) {
+    const expiryMins = state.tokenExpiry ? Math.max(0,Math.round((new Date(state.tokenExpiry)-new Date())/60000)) : 0;
+    titleWrap.appendChild(el("span",{style:{fontSize:"9px",color:"#22c55e",fontFamily:"monospace"}},expiryMins+"m"));
+  }
+  topbar.appendChild(titleWrap);
+
+  const rightWrap = el("div",{style:{display:"flex",alignItems:"center",gap:"8px"}});
+
+  if (!isAuthenticated()) {
+    const connectBtn = el("button",{style:{background:"#fff",color:"#1c1c1e",border:"none",borderRadius:"8px",padding:"7px 12px",fontSize:"12px",fontWeight:600,cursor:"pointer"}},"Connect");
+    connectBtn.addEventListener("click",connectGoogle);
+    rightWrap.appendChild(connectBtn);
+  } else {
+    const modelSel = el("select",{style:{background:"#2c2c2e",color:"#fff",border:"1px solid rgba(255,255,255,0.2)",borderRadius:"8px",padding:"5px 8px",fontSize:"12px",cursor:"pointer"}});
+    state.models.forEach(m=>{
+      const opt = el("option",{value:m.id},m.label);
+      if (m.id===state.model) opt.selected=true;
+      modelSel.appendChild(opt);
+    });
+    modelSel.addEventListener("change",e=>setState({model:e.target.value}));
+    rightWrap.appendChild(modelSel);
+  }
+  topbar.appendChild(rightWrap);
   wrap.appendChild(topbar);
 
   // Content area
@@ -2300,17 +2316,20 @@ function renderMobileCalendar() {
   dayNav.appendChild(nextDay);
   wrap.appendChild(dayNav);
 
-  // Account filter
-  const accFilter = el("div",{style:{display:"flex",gap:"6px",padding:"10px 16px",overflowX:"auto",background:"#fff",borderBottom:"1px solid #f0f0f0"}});
-  const allAccBtn = el("button",{style:{padding:"5px 12px",borderRadius:"20px",border:"1.5px solid",borderColor:state.mobileAccount==="all"?"#1c1c1e":"#e5e7eb",background:state.mobileAccount==="all"?"#1c1c1e":"transparent",color:state.mobileAccount==="all"?"#fff":"#6b7280",fontSize:"11px",cursor:"pointer",whiteSpace:"nowrap",fontWeight:state.mobileAccount==="all"?"600":"400"}},"All");
-  allAccBtn.addEventListener("click",()=>setState({mobileAccount:"all"}));
-  accFilter.appendChild(allAccBtn);
+  // Account filter dropdown
+  const accFilter = el("div",{style:{padding:"10px 16px",background:"#fff",borderBottom:"1px solid #f0f0f0",display:"flex",alignItems:"center",gap:"8px"}});
+  accFilter.appendChild(el("span",{style:{fontSize:"11px",color:"#9ca3af",whiteSpace:"nowrap"}},"Account:"));
+  const accDropdown = el("select",{style:{flex:1,border:"1px solid #e5e7eb",borderRadius:"8px",padding:"6px 10px",fontSize:"12px",background:"#fff",color:"#1a1a1a"}});
+  const allOpt = el("option",{value:"all"},"All Accounts");
+  if (state.mobileAccount==="all") allOpt.selected=true;
+  accDropdown.appendChild(allOpt);
   state.accounts.forEach(a=>{
-    const active = state.mobileAccount===a.id;
-    const btn = el("button",{style:{padding:"5px 12px",borderRadius:"20px",border:"1.5px solid",borderColor:active?a.color:"#e5e7eb",background:active?a.color+"22":"transparent",color:active?a.color:"#6b7280",fontSize:"11px",cursor:"pointer",whiteSpace:"nowrap",fontWeight:active?"600":"400"}},a.sub);
-    btn.addEventListener("click",()=>setState({mobileAccount:a.id}));
-    accFilter.appendChild(btn);
+    const opt = el("option",{value:a.id},a.sub+" ("+a.platform+")");
+    if (state.mobileAccount===a.id) opt.selected=true;
+    accDropdown.appendChild(opt);
   });
+  accDropdown.addEventListener("change",e=>setState({mobileAccount:e.target.value}));
+  accFilter.appendChild(accDropdown);
   wrap.appendChild(accFilter);
 
   // Posts for this day
@@ -2410,14 +2429,20 @@ function renderMobileMetrics() {
   // Filters
   const filterBar = el("div",{style:{padding:"10px 16px",background:"#fff",borderBottom:"1px solid #f0f0f0",position:"sticky",top:0,zIndex:10}});
 
-  // Account filter
-  const accRow = el("div",{style:{display:"flex",gap:"6px",overflowX:"auto",marginBottom:"8px"}});
-  [{id:"all",label:"All",color:"#888"},...state.accounts].forEach(a=>{
-    const active = state.mobileMetricsAccount===a.id;
-    const btn = el("button",{style:{padding:"5px 12px",borderRadius:"20px",border:"1.5px solid",borderColor:active?a.color||"#1c1c1e":"#e5e7eb",background:active?(a.color||"#1c1c1e")+"22":"transparent",color:active?a.color||"#1c1c1e":"#6b7280",fontSize:"11px",cursor:"pointer",whiteSpace:"nowrap",fontWeight:active?"600":"400"}},a.sub||a.label);
-    btn.addEventListener("click",()=>setState({mobileMetricsAccount:a.id}));
-    accRow.appendChild(btn);
+  // Account filter dropdown
+  const accRow = el("div",{style:{display:"flex",alignItems:"center",gap:"8px",marginBottom:"8px"}});
+  accRow.appendChild(el("span",{style:{fontSize:"11px",color:"#9ca3af",whiteSpace:"nowrap"}},"Account:"));
+  const metAccSel = el("select",{style:{flex:1,border:"1px solid #e5e7eb",borderRadius:"8px",padding:"6px 10px",fontSize:"12px",background:"#fff",color:"#1a1a1a"}});
+  const metAllOpt = el("option",{value:"all"},"All Accounts");
+  if (state.mobileMetricsAccount==="all") metAllOpt.selected=true;
+  metAccSel.appendChild(metAllOpt);
+  state.accounts.forEach(a=>{
+    const opt = el("option",{value:a.id},a.sub+" ("+a.platform+")");
+    if (state.mobileMetricsAccount===a.id) opt.selected=true;
+    metAccSel.appendChild(opt);
   });
+  metAccSel.addEventListener("change",e=>setState({mobileMetricsAccount:e.target.value}));
+  accRow.appendChild(metAccSel);
   filterBar.appendChild(accRow);
 
   // Sort row
