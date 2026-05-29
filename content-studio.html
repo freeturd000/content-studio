@@ -1,0 +1,1798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Content Studio</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:system-ui,sans-serif;font-size:13px;background:#f8f8f7;overflow:hidden;height:100vh;}
+.app{display:flex;height:100vh;overflow:hidden;}
+.sidebar{width:220px;background:#1c1c1e;display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto;}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.topbar{padding:10px 16px;background:#fff;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.card{background:#fff;border:1px solid #f0f0f0;border-radius:12px;padding:12px;}
+button{cursor:pointer;font-family:system-ui;font-size:12px;}
+input,select,textarea{font-family:system-ui;font-size:12px;color:#1a1a1a;}
+.inp{width:100%;padding:7px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;box-sizing:border-box;}
+.sel{width:100%;padding:7px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;}
+.btn-primary{padding:7px 14px;border-radius:8px;border:none;background:#1c1c1e;color:#fff;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:5px;}
+.btn-secondary{padding:7px 14px;border-radius:8px;border:1px solid #e5e7eb;background:transparent;color:#6b7280;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:5px;}
+.btn-danger{padding:4px 10px;border-radius:6px;border:none;background:#fef2f2;color:#ef4444;cursor:pointer;font-size:11px;}
+.lbl{font-size:10px;color:#9ca3af;font-family:monospace;letter-spacing:0.06em;margin-bottom:4px;display:block;}
+.nav-btn{display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;border:none;border-radius:8px;background:transparent;color:#9ca3af;font-size:12px;cursor:pointer;text-align:left;margin-bottom:2px;}
+.nav-btn.active{background:rgba(255,255,255,0.1);color:#fff;font-weight:500;}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex-shrink:0;}
+.badge{display:inline-flex;align-items:center;font-size:10px;padding:2px 8px;border-radius:20px;font-weight:600;font-family:monospace;}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.content-area{flex:1;overflow-y:auto;padding:16px;}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:1000;display:flex;align-items:center;justify-content:center;}
+.modal{background:#fff;border-radius:16px;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,0.15);}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:20px;border:1.5px solid #e5e7eb;background:transparent;cursor:pointer;font-size:11px;color:#6b7280;}
+.pill.active{font-weight:600;}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 24px;text-align:center;}
+.section-title{font-size:10px;color:#6b7280;font-family:monospace;letter-spacing:0.06em;margin-bottom:8px;}
+.status-draft{background:#f3f4f6;color:#6b7280;}
+.status-scheduled{background:#eff6ff;color:#1d4ed8;}
+.status-posted{background:#f0fdf4;color:#15803d;}
+.status-missed{background:#fef2f2;color:#b91c1c;}
+.sc-draft{border-left:2px solid #9ca3af;}
+.sc-scheduled{border-left:2px solid #3b82f6;}
+.sc-posted{border-left:2px solid #22c55e;}
+.sc-missed{border-left:2px solid #ef4444;}
+.google-btn{display:flex;align-items:center;gap:10px;padding:10px 20px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;font-weight:500;color:#374151;}
+.google-btn:hover{background:#f9fafb;}
+.sync-indicator{display:flex;align-items:center;gap:5px;font-size:11px;color:#22c55e;font-family:monospace;}
+.sync-indicator.syncing{color:#3b82f6;}
+.sync-indicator.error{color:#ef4444;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+const CLIENT_ID = "513513180742-ktqjuav3ojgu8kqchmhg0su0mrkkcpev.apps.googleusercontent.com";
+const SPREADSHEET_ID = "1jv8krJrNq3rQN4vg_Km1kcQgQELZjZRWFangxjJrRdw";
+const MODELS_FOLDER_ID = "1LfhDyr7n3CVE5zIIbOy4utX0LMjw8odk";
+const CONTENT_STUDIO_FOLDER_ID = "1iMfJnbw6CUng0LUDlNfetStkvwg2BNTa";
+const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive";
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let state = {
+  tab: "library",
+  model: "all",
+  token: null,
+  tokenExpiry: null,
+  syncing: false,
+  syncError: null,
+  lastSynced: null,
+
+  models:    [{id:"all",label:"All Models"},{id:"lilly",label:"Lilly Rose"}],
+  platforms: [{id:"instagram",name:"Instagram",color:"#E1306C"},{id:"tiktok",name:"TikTok",color:"#555"}],
+  postTypes: [{id:"Story",name:"Story"},{id:"Slideshow",name:"Slideshow"},{id:"Carousel",name:"Carousel"},{id:"Reel",name:"Reel"}],
+  accounts:  [
+    {id:"ig-main", handle:"@thelillyrosey",platform:"Instagram",sub:"IG Main",  color:"#E1306C",followers:1240,status:"active",modelId:"lilly"},
+    {id:"ig-reels",handle:"@thelillyrosey",platform:"Instagram",sub:"IG Reels", color:"#E1306C",followers:890, status:"active",modelId:"lilly"},
+    {id:"tt-1",    handle:"@thelillyrosey",platform:"TikTok",   sub:"TikTok 1", color:"#555",   followers:3400,status:"active",modelId:"lilly"},
+    {id:"tt-2",    handle:"@lillsrosey",   platform:"TikTok",   sub:"TikTok 2", color:"#555",   followers:1800,status:"inactive",modelId:"lilly"},
+  ],
+  folders: [
+    {id:"f1", name:"Selfie",       parentId:null,driveId:null},
+    {id:"f1a",name:"Bathroom",     parentId:"f1",driveId:null},
+    {id:"f1b",name:"Bedroom",      parentId:"f1",driveId:null},
+    {id:"f1c",name:"Car",          parentId:"f1",driveId:null},
+    {id:"f2", name:"Lifestyle",    parentId:null,driveId:null},
+    {id:"f2a",name:"Beach",        parentId:"f2",driveId:null},
+    {id:"f2b",name:"Pool",         parentId:"f2",driveId:null},
+    {id:"f3", name:"TikTok Quotes",parentId:null,driveId:null},
+    {id:"f4", name:"Carousels",    parentId:null,driveId:null},
+  ],
+  content: [],
+  drafts:  [],
+
+  // UI state
+  selectedContent: null,
+  calendarMonthOffset: 0,
+  calendarFilters: {platforms:[],accounts:[],types:[]},
+  metricsFilters:  {platforms:[],accounts:[],types:[]},
+  metricsSortBy: "date",
+  metricsSortDir: "desc",
+  libraryFolder: "all",
+  librarySearch: "",
+
+  // modals
+  showSettings: false,
+  showConfirm: null,
+  showEditAccount: null,
+  showAddAccount: false,
+  showAddModel: false,
+  showDraftModal: null,
+  showMetricsUpdate: null,
+  showUpload: false,
+  editingDraft: null,
+
+  // draft form
+  draftForm: {platform:"Instagram",accountId:"ig-main",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},
+  draftNameOverridden: false,
+};
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+const NOW = new Date();
+const fmt = n => n >= 1000 ? (n/1000).toFixed(1)+"k" : String(n||0);
+const pct = (a,b) => b ? ((a/b)*100).toFixed(1)+"%" : "0%";
+const SC  = {draft:"#9ca3af",scheduled:"#3b82f6",posted:"#22c55e",missed:"#ef4444"};
+const SBG = {draft:"#f3f4f6",scheduled:"#eff6ff",posted:"#f0fdf4",missed:"#fef2f2"};
+const STX = {draft:"#6b7280",scheduled:"#1d4ed8",posted:"#15803d",missed:"#b91c1c"};
+
+function getStatus(d) {
+  if (d.status === "posted") return "posted";
+  if (new Date(d.scheduledAt) < NOW) return "missed";
+  return d.status === "draft" ? "draft" : "scheduled";
+}
+function isPast(s) { return new Date(s) < NOW; }
+
+function folderPath(folderId, folders) {
+  const f = folders.find(x => x.id === folderId);
+  if (!f) return "";
+  if (!f.parentId) return f.name;
+  const p = folders.find(x => x.id === f.parentId);
+  return p ? p.name + " > " + f.name : f.name;
+}
+
+function autoName(platform, accountId, type, date, order) {
+  const code = platform === "Instagram" ? "IG" : "TT";
+  const d = date ? date.slice(0,10).replace(/-/g,"") : "00000000";
+  return code+"-"+accountId+"-"+type+"-"+String(order).padStart(3,"0")+"-"+d;
+}
+
+function setState(updates) {
+  Object.assign(state, updates);
+  render();
+}
+
+// ── GOOGLE AUTH ───────────────────────────────────────────────────────────────
+function isAuthenticated() {
+  return state.token && state.tokenExpiry && new Date() < new Date(state.tokenExpiry);
+}
+
+function connectGoogle() {
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    redirect_uri: window.location.origin + window.location.pathname,
+    response_type: "token",
+    scope: SCOPES,
+    include_granted_scopes: "true",
+  });
+  const popup = window.open("https://accounts.google.com/o/oauth2/v2/auth?" + params.toString(), "oauth", "width=500,height=600");
+
+  const interval = setInterval(() => {
+    try {
+      if (!popup || popup.closed) { clearInterval(interval); return; }
+      const url = popup.location.href;
+      if (url.includes("access_token")) {
+        const hash = new URLSearchParams(url.split("#")[1]);
+        const token = hash.get("access_token");
+        const expiresIn = parseInt(hash.get("expires_in") || "3600");
+        const expiry = new Date(Date.now() + expiresIn * 1000).toISOString();
+        popup.close();
+        clearInterval(interval);
+        setState({token, tokenExpiry: expiry, syncError: null});
+        loadFromSheets();
+      }
+    } catch(e) {}
+  }, 500);
+}
+
+function disconnectGoogle() {
+  setState({token: null, tokenExpiry: null});
+}
+
+// ── SHEETS API ────────────────────────────────────────────────────────────────
+async function sheetsGet(range) {
+  const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}`, {
+    headers: {Authorization: "Bearer " + state.token}
+  });
+  if (!r.ok) throw new Error("Sheets read failed: " + r.status);
+  const data = await r.json();
+  return data.values || [];
+}
+
+async function sheetsSet(range, values) {
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, {
+    method: "PUT",
+    headers: {Authorization: "Bearer " + state.token, "Content-Type": "application/json"},
+    body: JSON.stringify({values})
+  });
+}
+
+async function sheetsClear(range) {
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}:clear`, {
+    method: "POST",
+    headers: {Authorization: "Bearer " + state.token}
+  });
+}
+
+async function ensureSheet(name) {
+  const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`, {
+    headers: {Authorization: "Bearer " + state.token}
+  });
+  const data = await r.json();
+  const exists = data.sheets?.some(s => s.properties.title === name);
+  if (!exists) {
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}:batchUpdate`, {
+      method: "POST",
+      headers: {Authorization: "Bearer " + state.token, "Content-Type": "application/json"},
+      body: JSON.stringify({requests:[{addSheet:{properties:{title:name}}}]})
+    });
+  }
+}
+
+// ── LOAD FROM SHEETS ──────────────────────────────────────────────────────────
+async function loadFromSheets() {
+  if (!isAuthenticated()) return;
+  setState({syncing: true, syncError: null});
+  try {
+    await Promise.all([
+      ensureSheet("Models"), ensureSheet("Accounts"), ensureSheet("Platforms"),
+      ensureSheet("PostTypes"), ensureSheet("Folders"), ensureSheet("Content"),
+      ensureSheet("Drafts"), ensureSheet("Posts"),
+    ]);
+
+    const [modelsData, accountsData, platformsData, postTypesData, foldersData, contentData, draftsData, postsData] = await Promise.all([
+      sheetsGet("Models!A2:C"), sheetsGet("Accounts!A2:J"), sheetsGet("Platforms!A2:C"),
+      sheetsGet("PostTypes!A2:B"), sheetsGet("Folders!A2:D"), sheetsGet("Content!A2:I"),
+      sheetsGet("Drafts!A2:L"), sheetsGet("Posts!A2:H"),
+    ]);
+
+    const models = modelsData.length ? modelsData.map(r => ({id:r[0],label:r[1]})) : state.models;
+    if (!models.find(m => m.id === "all")) models.unshift({id:"all",label:"All Models"});
+
+    const platforms = platformsData.length ? platformsData.map(r => ({id:r[0],name:r[1],color:r[2]||"#888"})) : state.platforms;
+    const postTypes = postTypesData.length ? postTypesData.map(r => ({id:r[0],name:r[1]})) : state.postTypes;
+    const accounts  = accountsData.length  ? accountsData.map(r  => ({id:r[0],handle:r[1],platform:r[2],sub:r[3],color:r[4],followers:parseInt(r[5])||0,status:r[6],modelId:r[7]})) : state.accounts;
+    const folders   = foldersData.length   ? foldersData.map(r   => ({id:r[0],name:r[1],parentId:r[2]||null,driveId:r[3]||null})) : state.folders;
+
+    const postsMap = {};
+    postsData.forEach(r => {
+      const contentId = r[0];
+      if (!postsMap[contentId]) postsMap[contentId] = [];
+      postsMap[contentId].push({accountId:r[1],date:r[2],views:parseInt(r[3])||0,likes:parseInt(r[4])||0,comments:parseInt(r[5])||0});
+    });
+
+    const content = contentData.map(r => ({
+      id:r[0], folderId:r[1], type:r[2], label:r[3], uploaded:r[4], icon:r[5]||"f",
+      modelId:r[6], driveId:r[7]||null, driveUrl:r[8]||null,
+      posts: postsMap[r[0]] || [],
+    }));
+
+    const drafts = draftsData.map(r => ({
+      id:r[0], name:r[1], accountId:r[2], platform:r[3], type:r[4],
+      contentIds: r[5] ? r[5].split("|") : [],
+      overlays:   r[6] ? r[6].split("|") : [],
+      caption:r[7]||"", hashtags:r[8]||"", scheduledAt:r[9]||"", status:r[10]||"draft", postOrder:parseInt(r[11])||1,
+    }));
+
+    setState({models, platforms, postTypes, accounts, folders, content, drafts, syncing:false, lastSynced: new Date().toLocaleTimeString()});
+  } catch(e) {
+    setState({syncing:false, syncError: e.message});
+  }
+}
+
+// ── SAVE TO SHEETS ────────────────────────────────────────────────────────────
+async function saveToSheets() {
+  if (!isAuthenticated()) return;
+  setState({syncing: true});
+  try {
+    await sheetsClear("Models!A2:C");
+    if (state.models.filter(m=>m.id!=="all").length) {
+      await sheetsSet("Models!A2", state.models.filter(m=>m.id!=="all").map(m=>[m.id,m.label,""]));
+    }
+
+    await sheetsClear("Platforms!A2:C");
+    if (state.platforms.length) await sheetsSet("Platforms!A2", state.platforms.map(p=>[p.id,p.name,p.color]));
+
+    await sheetsClear("PostTypes!A2:B");
+    if (state.postTypes.length) await sheetsSet("PostTypes!A2", state.postTypes.map(t=>[t.id,t.name]));
+
+    await sheetsClear("Accounts!A2:J");
+    if (state.accounts.length) await sheetsSet("Accounts!A2", state.accounts.map(a=>[a.id,a.handle,a.platform,a.sub,a.color,a.followers,a.status,a.modelId,"",""]));
+
+    await sheetsClear("Folders!A2:D");
+    if (state.folders.length) await sheetsSet("Folders!A2", state.folders.map(f=>[f.id,f.name,f.parentId||"",f.driveId||""]));
+
+    await sheetsClear("Content!A2:I");
+    if (state.content.length) await sheetsSet("Content!A2", state.content.map(c=>[c.id,c.folderId,c.type,c.label,c.uploaded,c.icon,c.modelId,c.driveId||"",c.driveUrl||""]));
+
+    await sheetsClear("Posts!A2:H");
+    const postRows = state.content.flatMap(c => c.posts.map(p=>[c.id,p.accountId,p.date,p.views,p.likes,p.comments,"",""]));
+    if (postRows.length) await sheetsSet("Posts!A2", postRows);
+
+    await sheetsClear("Drafts!A2:L");
+    if (state.drafts.length) await sheetsSet("Drafts!A2", state.drafts.map(d=>[
+      d.id, d.name, d.accountId, d.platform, d.type,
+      d.contentIds.join("|"), d.overlays.join("|"),
+      d.caption, d.hashtags, d.scheduledAt, d.status, d.postOrder
+    ]));
+
+    setState({syncing:false, lastSynced: new Date().toLocaleTimeString()});
+  } catch(e) {
+    setState({syncing:false, syncError: e.message});
+  }
+}
+
+// ── DRIVE API ─────────────────────────────────────────────────────────────────
+async function driveListFolder(folderId) {
+  const r = await fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+trashed=false&fields=files(id,name,mimeType)&orderBy=name`, {
+    headers: {Authorization: "Bearer " + state.token}
+  });
+  const data = await r.json();
+  return data.files || [];
+}
+
+async function driveCreateFolder(name, parentId) {
+  const r = await fetch("https://www.googleapis.com/drive/v3/files", {
+    method: "POST",
+    headers: {Authorization: "Bearer " + state.token, "Content-Type": "application/json"},
+    body: JSON.stringify({name, mimeType:"application/vnd.google-apps.folder", parents:[parentId]})
+  });
+  const data = await r.json();
+  return data.id;
+}
+
+async function driveUploadFile(file, name, parentId) {
+  const meta = JSON.stringify({name, parents:[parentId]});
+  const form = new FormData();
+  form.append("metadata", new Blob([meta], {type:"application/json"}));
+  form.append("file", file);
+  const r = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink", {
+    method: "POST",
+    headers: {Authorization: "Bearer " + state.token},
+    body: form
+  });
+  return await r.json();
+}
+
+async function driveCountFilesInFolder(folderId) {
+  const files = await driveListFolder(folderId);
+  return files.filter(f => f.mimeType !== "application/vnd.google-apps.folder").length;
+}
+
+// ── DRIVE FOLDER SYNC ─────────────────────────────────────────────────────────
+async function syncDriveFolders(modelDriveId, sfwOrNsfw) {
+  // Find or create 03 - Content > SFW/NSFW > 05 - Ready
+  const modelContents = await driveListFolder(modelDriveId);
+  let contentFolder = modelContents.find(f => f.name === "03 - Content");
+  if (!contentFolder) { const id = await driveCreateFolder("03 - Content", modelDriveId); contentFolder = {id}; }
+
+  const contentChildren = await driveListFolder(contentFolder.id);
+  const sfwLabel = sfwOrNsfw === "SFW" ? "01 - SFW" : "02 - NSFW";
+  let sfwFolder = contentChildren.find(f => f.name === sfwLabel);
+  if (!sfwFolder) { const id = await driveCreateFolder(sfwLabel, contentFolder.id); sfwFolder = {id}; }
+
+  const sfwChildren = await driveListFolder(sfwFolder.id);
+  let readyFolder = sfwChildren.find(f => f.name === "05 - Ready");
+  if (!readyFolder) { const id = await driveCreateFolder("05 - Ready", sfwFolder.id); readyFolder = {id}; }
+
+  return readyFolder.id;
+}
+
+// ── CREATE NEW MODEL IN DRIVE ─────────────────────────────────────────────────
+async function createModelInDrive(modelName) {
+  if (!isAuthenticated()) return null;
+  try {
+    const existing = await driveListFolder(MODELS_FOLDER_ID);
+    const nums = existing.map(f => parseInt(f.name.split(" - ")[0])).filter(n => !isNaN(n));
+    const nextNum = nums.length ? Math.max(...nums) + 1 : 1;
+    const folderName = String(nextNum).padStart(2,"0") + " - " + modelName;
+    const folderId = await driveCreateFolder(folderName, MODELS_FOLDER_ID);
+    await driveCreateFolder("01 - Ideation", folderId);
+    await driveCreateFolder("02 - Creation", folderId);
+    const contentId = await driveCreateFolder("03 - Content", folderId);
+    const sfwId = await driveCreateFolder("01 - SFW", contentId);
+    const nsfwId = await driveCreateFolder("02 - NSFW", contentId);
+    await driveCreateFolder("01 - Anchor References", sfwId);
+    await driveCreateFolder("02 - Inspiration", sfwId);
+    await driveCreateFolder("03 - Raw", sfwId);
+    await driveCreateFolder("04 - Edit", sfwId);
+    await driveCreateFolder("05 - Ready", sfwId);
+    await driveCreateFolder("01 - Anchor References", nsfwId);
+    await driveCreateFolder("02 - Inspiration", nsfwId);
+    await driveCreateFolder("03 - Raw", nsfwId);
+    await driveCreateFolder("04 - Edit", nsfwId);
+    await driveCreateFolder("05 - Ready", nsfwId);
+    await driveCreateFolder("04 - AI", folderId);
+    return {folderId, folderName};
+  } catch(e) {
+    console.error("Drive folder creation failed:", e);
+    return null;
+  }
+}
+
+// ── UPLOAD FILE ───────────────────────────────────────────────────────────────
+async function uploadFile(file, folderId, modelName, category, subfolder, sfwNsfw) {
+  if (!isAuthenticated()) return null;
+  try {
+    const folderFiles = await driveListFolder(folderId);
+    const count = folderFiles.filter(f => f.mimeType !== "application/vnd.google-apps.folder").length;
+    const nextNum = String(count + 1).padStart(4, "0");
+    const ext = file.name.split(".").pop();
+    const safeName = modelName.replace(/\s+/g,"");
+    const safeCategory = category.toLowerCase().replace(/\s+/g,"-");
+    const safeSubfolder = subfolder.toLowerCase().replace(/\s+/g,"-");
+    const newName = safeName + "_" + safeCategory + "_" + safeSubfolder + "_" + nextNum + "." + ext;
+    const result = await driveUploadFile(file, newName, folderId);
+    return {name: newName, driveId: result.id, driveUrl: result.webViewLink};
+  } catch(e) {
+    console.error("Upload failed:", e);
+    return null;
+  }
+}
+
+// ── RENDER ────────────────────────────────────────────────────────────────────
+function render() {
+  const root = document.getElementById("root");
+  root.innerHTML = "";
+  root.appendChild(renderApp());
+}
+
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  if (attrs) Object.entries(attrs).forEach(([k,v]) => {
+    if (k === "style" && typeof v === "object") Object.assign(e.style, v);
+    else if (k.startsWith("on") && typeof v === "function") e.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === "class") e.className = v;
+    else if (k === "checked" && tag === "input") e.checked = v;
+    else if (k === "value" && (tag === "input" || tag === "select" || tag === "textarea")) { e.value = v || ""; }
+    else if (k === "placeholder") e.placeholder = v;
+    else if (k === "type") e.type = v;
+    else if (k === "disabled") e.disabled = v;
+    else if (k === "rows") e.rows = v;
+    else e.setAttribute(k, v);
+  });
+  children.flat(Infinity).forEach(c => {
+    if (c === null || c === undefined) return;
+    if (typeof c === "string" || typeof c === "number") e.appendChild(document.createTextNode(String(c)));
+    else if (c instanceof Element) e.appendChild(c);
+  });
+  return e;
+}
+
+function txt(s) { return document.createTextNode(String(s||"")); }
+
+function div(cls, style, ...children) {
+  return el("div", {class:cls||"", style:style||{}}, ...children);
+}
+
+// ── COMPONENTS ────────────────────────────────────────────────────────────────
+
+function renderDot(color, size) {
+  return el("span", {class:"dot", style:{background:color||"#888",width:(size||7)+"px",height:(size||7)+"px"}});
+}
+
+function renderBadge(status) {
+  return el("span", {class:"badge status-"+status}, status.toUpperCase());
+}
+
+function renderBtn(label, primary, onClick, extra) {
+  const b = el("button", {class: primary?"btn-primary":"btn-secondary", onClick}, label);
+  if (extra) Object.assign(b.style, extra);
+  return b;
+}
+
+function renderInp(val, onChange, placeholder, type) {
+  const i = el("input", {class:"inp", value:val, placeholder:placeholder||"", type:type||"text"});
+  i.addEventListener("input", e => onChange(e.target.value));
+  return i;
+}
+
+function renderSel(val, options, onChange) {
+  const s = el("select", {class:"sel", value:val});
+  options.forEach(o => {
+    const opt = el("option", {value:o.value||o}, o.label||o);
+    if ((o.value||o) === val) opt.selected = true;
+    s.appendChild(opt);
+  });
+  s.addEventListener("change", e => onChange(e.target.value));
+  return s;
+}
+
+function renderMultiSelect(label, options, selected, onChange) {
+  const wrap = el("div", {style:{position:"relative",display:"inline-block",minWidth:"110px"}});
+  const isAll = selected.length === 0;
+  const display = isAll ? label : selected.length <= 2 ? selected.map(s=>options.find(o=>o.id===s)?.label||s).join(", ") : selected.length+" selected";
+
+  const btn = el("button", {style:{padding:"5px 10px",border:"1px solid #e5e7eb",borderRadius:"8px",background:"#fff",fontSize:"11px",cursor:"pointer",display:"flex",alignItems:"center",gap:"5px",color:"#374151",whiteSpace:"nowrap"}}, display+" v");
+  const dropdown = el("div", {style:{display:"none",position:"absolute",top:"100%",left:0,zIndex:999,background:"#fff",border:"1px solid #e5e7eb",borderRadius:"10px",boxShadow:"0 4px 20px rgba(0,0,0,0.1)",minWidth:"160px",marginTop:"4px",padding:"4px"}});
+
+  const allLabel = el("label", {style:{display:"flex",alignItems:"center",gap:"8px",padding:"6px 10px",cursor:"pointer",borderRadius:"6px",background:isAll?"#f3f4f6":"transparent",borderBottom:"1px solid #f0f0f0",marginBottom:"2px"}});
+  const allCheck = el("input", {type:"checkbox", style:{width:"12px",height:"12px",cursor:"pointer"}});
+  allCheck.checked = isAll;
+  allCheck.addEventListener("change", () => { onChange([]); dropdown.style.display="none"; });
+  allLabel.appendChild(allCheck);
+  allLabel.appendChild(txt("All"));
+  dropdown.appendChild(allLabel);
+
+  options.forEach(o => {
+    const lbl = el("label", {style:{display:"flex",alignItems:"center",gap:"8px",padding:"6px 10px",cursor:"pointer",borderRadius:"6px",background:selected.includes(o.id)?"#f3f4f6":"transparent"}});
+    const chk = el("input", {type:"checkbox", style:{width:"12px",height:"12px",cursor:"pointer"}});
+    chk.checked = selected.includes(o.id);
+    chk.addEventListener("change", () => {
+      const next = selected.includes(o.id) ? selected.filter(x=>x!==o.id) : [...selected,o.id];
+      onChange(next);
+    });
+    lbl.appendChild(chk);
+    if (o.color) lbl.appendChild(renderDot(o.color, 6));
+    lbl.appendChild(txt(o.label));
+    dropdown.appendChild(lbl);
+  });
+
+  btn.addEventListener("click", e => { e.stopPropagation(); dropdown.style.display = dropdown.style.display==="none"?"block":"none"; });
+  document.addEventListener("click", () => { dropdown.style.display="none"; }, {once:false});
+
+  wrap.appendChild(btn);
+  wrap.appendChild(dropdown);
+  return wrap;
+}
+
+function renderConfirm(message, onYes, onNo) {
+  const overlay = div("overlay", {});
+  const modal = div("modal", {width:"300px"});
+  modal.appendChild(el("div", {style:{fontSize:"14px",fontWeight:500,marginBottom:"8px"}}, "Are you sure?"));
+  modal.appendChild(el("div", {style:{fontSize:"13px",color:"#6b7280",marginBottom:"20px",lineHeight:1.5}}, message));
+  const btns = div("", {display:"flex",gap:"8px"});
+  btns.appendChild(renderBtn("Delete", true, onYes, {background:"#ef4444",flex:1,justifyContent:"center"}));
+  btns.appendChild(renderBtn("Cancel", false, onNo, {flex:1,justifyContent:"center"}));
+  modal.appendChild(btns);
+  overlay.appendChild(modal);
+  return overlay;
+}
+
+function renderEmptyState(title, sub, actionLabel, onAction) {
+  const wrap = div("empty-state", {});
+  wrap.appendChild(el("div", {style:{fontSize:"32px",marginBottom:"12px",opacity:0.3}}, "[ ]"));
+  wrap.appendChild(el("div", {style:{fontSize:"14px",fontWeight:500,color:"#374151",marginBottom:"4px"}}, title));
+  wrap.appendChild(el("div", {style:{fontSize:"12px",color:"#9ca3af",marginBottom:"16px",maxWidth:"220px",lineHeight:1.5}}, sub));
+  if (actionLabel) wrap.appendChild(renderBtn(actionLabel, true, onAction));
+  return wrap;
+}
+
+// ── SIDEBAR ───────────────────────────────────────────────────────────────────
+function renderSidebar() {
+  const side = el("div", {class:"sidebar"});
+
+  // Logo
+  const logo = div("", {padding:"16px 12px 12px",borderBottom:"1px solid rgba(255,255,255,0.08)"});
+  logo.appendChild(el("div", {style:{fontSize:"15px",fontWeight:600,color:"#fff",marginBottom:"2px"}}, "Content Studio"));
+  logo.appendChild(el("div", {style:{fontSize:"10px",color:"#6b7280",fontFamily:"monospace"}}, "AI Influencer Manager"));
+  side.appendChild(logo);
+
+  // Google auth status
+  const authWrap = div("", {padding:"10px 12px",borderBottom:"1px solid rgba(255,255,255,0.08)"});
+  if (isAuthenticated()) {
+    const syncWrap = div("", {display:"flex",alignItems:"center",justifyContent:"space-between"});
+    const syncClass = state.syncing ? "sync-indicator syncing" : state.syncError ? "sync-indicator error" : "sync-indicator";
+    const syncText = state.syncing ? "Syncing..." : state.syncError ? "Sync error" : state.lastSynced ? "Synced "+state.lastSynced : "Connected";
+    syncWrap.appendChild(el("span", {class:syncClass}, syncText));
+    const syncBtns = div("", {display:"flex",gap:"4px"});
+    const saveBtn = el("button", {style:{fontSize:"10px",padding:"2px 8px",border:"1px solid rgba(255,255,255,0.2)",borderRadius:"6px",background:"transparent",color:"#9ca3af",cursor:"pointer"}}, "Save");
+    saveBtn.addEventListener("click", saveToSheets);
+    const loadBtn = el("button", {style:{fontSize:"10px",padding:"2px 8px",border:"1px solid rgba(255,255,255,0.2)",borderRadius:"6px",background:"transparent",color:"#9ca3af",cursor:"pointer"}}, "Load");
+    loadBtn.addEventListener("click", loadFromSheets);
+    const discBtn = el("button", {style:{fontSize:"10px",padding:"2px 8px",border:"1px solid rgba(255,255,255,0.2)",borderRadius:"6px",background:"transparent",color:"#9ca3af",cursor:"pointer"}}, "x");
+    discBtn.addEventListener("click", disconnectGoogle);
+    syncBtns.appendChild(saveBtn);
+    syncBtns.appendChild(loadBtn);
+    syncBtns.appendChild(discBtn);
+    syncWrap.appendChild(syncBtns);
+    authWrap.appendChild(syncWrap);
+  } else {
+    const googleBtn = el("button", {class:"google-btn", style:{width:"100%",justifyContent:"center",fontSize:"11px",padding:"7px"}}, "Connect Google");
+    googleBtn.addEventListener("click", connectGoogle);
+    authWrap.appendChild(googleBtn);
+  }
+  side.appendChild(authWrap);
+
+  // Model dropdown
+  const modelWrap = div("", {padding:"10px 12px",borderBottom:"1px solid rgba(255,255,255,0.08)"});
+  modelWrap.appendChild(el("span", {class:"lbl", style:{color:"#6b7280"}}, "MODEL"));
+  const modelSel = renderSel(state.model, state.models.map(m=>({value:m.id,label:m.label})), v => setState({model:v}));
+  Object.assign(modelSel.style, {background:"#2c2c2e",color:"#fff",border:"1px solid rgba(255,255,255,0.1)",fontSize:"12px"});
+  modelWrap.appendChild(modelSel);
+  side.appendChild(modelWrap);
+
+  // Nav
+  const navWrap = div("", {padding:"10px 12px 4px",borderBottom:"1px solid rgba(255,255,255,0.08)"});
+  navWrap.appendChild(el("span", {class:"lbl", style:{fontSize:"9px",color:"#6b7280"}}, "VIEWS"));
+  [
+    {id:"library", label:"Content Library"},
+    {id:"draft",   label:"Draft Post"},
+    {id:"calendar",label:"Calendar"},
+    {id:"metrics", label:"Metrics"},
+  ].forEach(t => {
+    const btn = el("button", {class:"nav-btn"+(state.tab===t.id?" active":"")}, t.label);
+    btn.addEventListener("click", () => setState({tab:t.id}));
+    navWrap.appendChild(btn);
+  });
+  side.appendChild(navWrap);
+
+  // Accounts
+  const accWrap = div("", {padding:"10px 12px 8px",flex:1});
+  const accHeader = div("", {display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"6px"});
+  accHeader.appendChild(el("span", {style:{fontSize:"9px",color:"#6b7280",fontFamily:"monospace",letterSpacing:"0.06em"}}, "ACCOUNTS"));
+  const addAccBtn = el("button", {style:{fontSize:"10px",color:"#9ca3af",border:"none",background:"transparent",cursor:"pointer"}}, "+ Add");
+  addAccBtn.addEventListener("click", () => setState({showAddAccount:true}));
+  accHeader.appendChild(addAccBtn);
+  accWrap.appendChild(accHeader);
+
+  state.accounts.forEach(a => {
+    const row = div("", {display:"flex",alignItems:"center",gap:"7px",padding:"5px 8px",borderRadius:"7px",cursor:"pointer",marginBottom:"2px",background:"rgba(255,255,255,0.03)"});
+    row.addEventListener("mouseenter", () => row.style.background="rgba(255,255,255,0.08)");
+    row.addEventListener("mouseleave", () => row.style.background="rgba(255,255,255,0.03)");
+    row.addEventListener("click", () => setState({showEditAccount:a}));
+    row.appendChild(renderDot(a.color));
+    const info = div("", {flex:1,minWidth:0});
+    info.appendChild(el("div", {style:{fontSize:"11px",color:a.status==="inactive"?"#6b7280":"#d1d5db",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}, a.sub));
+    info.appendChild(el("div", {style:{fontSize:"9px",color:"#6b7280",fontFamily:"monospace"}}, a.handle));
+    row.appendChild(info);
+    row.appendChild(el("span", {class:"dot", style:{width:"6px",height:"6px",background:a.status==="active"?"#22c55e":"#6b7280"}}));
+    accWrap.appendChild(row);
+  });
+  side.appendChild(accWrap);
+
+  // Settings
+  const settingsWrap = div("", {padding:"12px",borderTop:"1px solid rgba(255,255,255,0.08)"});
+  const settingsBtn = el("button", {style:{display:"flex",alignItems:"center",gap:"8px",width:"100%",padding:"8px 12px",border:"none",borderRadius:"8px",background:"transparent",color:"#9ca3af",fontSize:"12px",cursor:"pointer",textAlign:"left"}}, "&#9881; Settings");
+  settingsBtn.innerHTML = "&#9881; Settings";
+  settingsBtn.addEventListener("click", () => setState({showSettings:true}));
+  settingsWrap.appendChild(settingsBtn);
+  side.appendChild(settingsWrap);
+
+  return side;
+}
+
+// ── CONTENT LIBRARY ───────────────────────────────────────────────────────────
+function renderLibrary() {
+  const wrap = div("", {display:"flex",height:"100%",overflow:"hidden"});
+
+  // Folder tree sidebar
+  const folderSide = div("", {width:"180px",background:"#fff",borderRight:"1px solid #f0f0f0",overflowY:"auto",padding:"12px 8px",flexShrink:0});
+  folderSide.appendChild(el("div", {class:"lbl", style:{padding:"0 4px",marginBottom:"8px"}}, "FOLDERS"));
+
+  const allBtn = el("button", {style:{display:"flex",alignItems:"center",gap:"6px",width:"100%",padding:"5px 8px",border:"none",borderRadius:"6px",background:state.libraryFolder==="all"?"rgba(28,28,30,0.1)":"transparent",color:state.libraryFolder==="all"?"#1c1c1e":"#6b7280",fontSize:"11px",cursor:"pointer",textAlign:"left",marginBottom:"1px"}}, "All Content");
+  allBtn.addEventListener("click", () => setState({libraryFolder:"all"}));
+  folderSide.appendChild(allBtn);
+
+  const roots = state.folders.filter(f=>!f.parentId);
+  roots.forEach(f => {
+    const kids = state.folders.filter(x=>x.parentId===f.id);
+    const isSel = state.libraryFolder===f.id;
+    const row = div("", {display:"flex",alignItems:"center"});
+
+    if (kids.length) {
+      const tog = el("button", {style:{border:"none",background:"transparent",cursor:"pointer",color:"#6b7280",fontSize:"10px",padding:"0 2px",flexShrink:0,width:"14px"}}, f._expanded?"v":">");
+      tog.addEventListener("click", () => { f._expanded=!f._expanded; render(); });
+      row.appendChild(tog);
+    }
+
+    const fBtn = el("button", {style:{display:"flex",alignItems:"center",flex:1,padding:"5px 6px",border:"none",borderRadius:"6px",background:isSel?"rgba(28,28,30,0.1)":"transparent",color:isSel?"#1c1c1e":"#6b7280",fontSize:"11px",cursor:"pointer",textAlign:"left",marginBottom:"1px",paddingLeft:kids.length?"6px":"18px"}}, f.name);
+    fBtn.addEventListener("click", () => setState({libraryFolder:f.id}));
+    row.appendChild(fBtn);
+    folderSide.appendChild(row);
+
+    if (f._expanded) {
+      kids.forEach(kid => {
+        const isSel2 = state.libraryFolder===kid.id;
+        const kBtn = el("button", {style:{display:"flex",alignItems:"center",gap:"6px",width:"100%",padding:"4px 6px 4px 24px",border:"none",borderRadius:"6px",background:isSel2?"rgba(28,28,30,0.1)":"transparent",color:isSel2?"#1c1c1e":"#6b7280",fontSize:"11px",cursor:"pointer",textAlign:"left",marginBottom:"1px"}}, "- "+kid.name);
+        kBtn.addEventListener("click", () => setState({libraryFolder:kid.id}));
+        folderSide.appendChild(kBtn);
+      });
+    }
+  });
+
+  // Add folder
+  const addFolderWrap = div("", {marginTop:"10px",borderTop:"1px solid #f0f0f0",paddingTop:"10px"});
+  const addFolderBtn = el("button", {style:{display:"flex",alignItems:"center",gap:"5px",width:"100%",padding:"5px 8px",border:"1px dashed #e5e7eb",borderRadius:"7px",background:"transparent",color:"#9ca3af",fontSize:"11px",cursor:"pointer"}}, "+ New Folder");
+  addFolderBtn.addEventListener("click", () => {
+    const name = prompt("Folder name:");
+    if (!name) return;
+    const parentOptions = state.folders.filter(f=>!f.parentId).map(f=>f.name);
+    let parentId = null;
+    if (parentOptions.length) {
+      const parentName = prompt("Parent folder? (leave blank for top level)\n"+parentOptions.join(", "));
+      if (parentName) {
+        const parent = state.folders.find(f=>f.name.toLowerCase()===parentName.toLowerCase());
+        if (parent) parentId = parent.id;
+      }
+    }
+    setState({folders:[...state.folders, {id:"f"+Date.now(),name,parentId,driveId:null}]});
+  });
+  addFolderWrap.appendChild(addFolderBtn);
+  folderSide.appendChild(addFolderWrap);
+  wrap.appendChild(folderSide);
+
+  // Main content
+  const main = div("", {flex:1,display:"flex",flexDirection:"column",overflow:"hidden"});
+
+  // Toolbar
+  const toolbar = div("", {padding:"10px 16px",background:"#fff",borderBottom:"1px solid #f0f0f0",display:"flex",alignItems:"center",gap:"8px",flexShrink:0,flexWrap:"wrap"});
+  const breadcrumb = state.libraryFolder==="all" ? "All Content" : folderPath(state.libraryFolder, state.folders);
+  toolbar.appendChild(el("span", {style:{fontSize:"13px",fontWeight:500,color:"#1a1a1a"}}, breadcrumb));
+
+  const searchInp = el("input", {class:"inp",placeholder:"Search...",style:{width:"180px",marginLeft:"auto"}});
+  searchInp.value = state.librarySearch;
+  searchInp.addEventListener("input", e => setState({librarySearch:e.target.value}));
+  toolbar.appendChild(searchInp);
+
+  const uploadBtn = renderBtn("Upload", true, () => setState({showUpload:true}));
+  toolbar.appendChild(uploadBtn);
+  main.appendChild(toolbar);
+
+  // Filter content
+  const modelContent = state.model==="all" ? state.content : state.content.filter(c=>c.modelId===state.model);
+  const getFolderIds = fid => { if(fid==="all") return null; const kids=state.folders.filter(f=>f.parentId===fid).map(f=>f.id); return [fid,...kids]; };
+  const filtered = modelContent.filter(c => {
+    const fids = getFolderIds(state.libraryFolder);
+    return (!fids||fids.includes(c.folderId)) && (!state.librarySearch||c.label.toLowerCase().includes(state.librarySearch.toLowerCase()));
+  });
+
+  // Stats
+  const statsRow = div("grid4", {padding:"12px 16px 0",flexShrink:0});
+  [{l:"Total",v:modelContent.length},{l:"Unused",v:modelContent.filter(c=>c.posts.length===0).length,c:"#22c55e"},{l:"Folders",v:state.folders.length},{l:"In View",v:filtered.length}].forEach(s => {
+    const card = div("card", {padding:"10px 14px"});
+    card.appendChild(el("div", {style:{fontSize:"22px",fontWeight:600,color:s.c||"#1a1a1a",fontFamily:"monospace"}}, s.v));
+    card.appendChild(el("div", {style:{fontSize:"11px",color:"#9ca3af",marginTop:"2px"}}, s.l));
+    statsRow.appendChild(card);
+  });
+  main.appendChild(statsRow);
+
+  // Grid
+  const contentArea = div("content-area", {});
+  if (filtered.length === 0) {
+    contentArea.appendChild(renderEmptyState("No content here", "Upload your first piece of content.", "Upload", () => setState({showUpload:true})));
+  } else {
+    const grid = div("", {display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:"10px"});
+    filtered.forEach(c => {
+      const igP = c.posts.filter(p=>state.accounts.find(a=>a.id===p.accountId)?.platform==="Instagram");
+      const ttP = c.posts.filter(p=>state.accounts.find(a=>a.id===p.accountId)?.platform==="TikTok");
+      const isSel = state.selectedContent===c.id;
+      const card = div("card", {cursor:"pointer",border:isSel?"1.5px solid #1c1c1e":"1px solid #f0f0f0",position:"relative"});
+      card.addEventListener("click", () => setState({selectedContent:isSel?null:c.id}));
+
+      if (c.posts.length===0) {
+        const badge = el("span", {style:{position:"absolute",top:"8px",right:"8px",fontSize:"9px",padding:"2px 6px",borderRadius:"20px",background:"#f0fdf4",color:"#15803d",fontWeight:600,fontFamily:"monospace"}}, "UNUSED");
+        card.appendChild(badge);
+      }
+
+      const thumb = div("", {width:"100%",aspectRatio:"4/3",borderRadius:"8px",background:"#f8f8f7",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"11px",color:"#9ca3af",marginBottom:"8px",fontWeight:500});
+      const thumbColors = {f:"#fce7f3",s:"#eff6ff",c:"#f0fdf4"};
+      const thumbLabels = {f:"Photo",s:"Slide",c:"Carousel"};
+      thumb.style.background = thumbColors[c.icon]||"#f3f4f6";
+      thumb.appendChild(txt(thumbLabels[c.icon]||"File"));
+      if (c.driveUrl) {
+        const img = el("img", {style:{width:"100%",height:"100%",objectFit:"cover",borderRadius:"8px"}});
+        img.src = c.driveUrl;
+        img.onerror = () => {};
+        thumb.innerHTML = "";
+        thumb.appendChild(img);
+      }
+      card.appendChild(thumb);
+      card.appendChild(el("div", {style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"3px"}}, c.type.toUpperCase()+" - "+folderPath(c.folderId,state.folders)));
+      card.appendChild(el("div", {style:{fontSize:"12px",fontWeight:500,lineHeight:1.3,marginBottom:"8px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}, c.label));
+
+      const pills = div("", {display:"flex",flexDirection:"column",gap:"3px"});
+      if (igP.length) igP.forEach(p=>{const a=state.accounts.find(x=>x.id===p.accountId);pills.appendChild(el("div",{style:{fontSize:"10px",color:"#be185d",background:"#fce7f3",borderRadius:"5px",padding:"2px 7px",fontFamily:"monospace"}},"IG - "+(a?.sub||"")+" - "+p.date));});
+      else pills.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",background:"#f9fafb",borderRadius:"5px",padding:"2px 7px",fontFamily:"monospace",border:"1px dashed #e5e7eb"}},"IG - not posted"));
+      if (ttP.length) ttP.forEach(p=>{const a=state.accounts.find(x=>x.id===p.accountId);pills.appendChild(el("div",{style:{fontSize:"10px",color:"#374151",background:"#f3f4f6",borderRadius:"5px",padding:"2px 7px",fontFamily:"monospace"}},"TT - "+(a?.sub||"")+" - "+p.date));});
+      else pills.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",background:"#f9fafb",borderRadius:"5px",padding:"2px 7px",fontFamily:"monospace",border:"1px dashed #e5e7eb"}},"TT - not posted"));
+      card.appendChild(pills);
+      grid.appendChild(card);
+    });
+    contentArea.appendChild(grid);
+  }
+  main.appendChild(contentArea);
+  wrap.appendChild(main);
+
+  // Detail panel
+  const sel = state.selectedContent ? state.content.find(c=>c.id===state.selectedContent) : null;
+  if (sel) {
+    const panel = div("", {width:"260px",background:"#fff",borderLeft:"1px solid #f0f0f0",overflowY:"auto",flexShrink:0});
+    const panelHeader = div("", {padding:"12px 14px",borderBottom:"1px solid #f0f0f0",display:"flex",alignItems:"center",justifyContent:"space-between"});
+    panelHeader.appendChild(el("span", {style:{fontSize:"13px",fontWeight:500}}, "Detail"));
+    const closeBtn = el("button", {style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"16px",color:"#9ca3af"}}, "x");
+    closeBtn.addEventListener("click", () => setState({selectedContent:null}));
+    panelHeader.appendChild(closeBtn);
+    panel.appendChild(panelHeader);
+
+    const panelBody = div("", {padding:"14px"});
+    const thumbP = div("", {width:"100%",aspectRatio:"9/12",borderRadius:"10px",background:"#f8f8f7",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px",color:"#9ca3af",marginBottom:"12px"});
+    thumbP.appendChild(txt(sel.type));
+    panelBody.appendChild(thumbP);
+    panelBody.appendChild(el("div", {style:{fontSize:"13px",fontWeight:500,marginBottom:"3px"}}, sel.label));
+    panelBody.appendChild(el("div", {style:{fontSize:"11px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"10px"}}, sel.type+" - "+folderPath(sel.folderId,state.folders)));
+
+    if (sel.driveUrl) {
+      const driveLink = el("a", {style:{fontSize:"11px",color:"#3b82f6",display:"block",marginBottom:"10px",wordBreak:"break-all"}}, "View in Drive");
+      driveLink.href = sel.driveUrl;
+      driveLink.target = "_blank";
+      panelBody.appendChild(driveLink);
+    }
+
+    const actionRow = div("", {display:"flex",gap:"5px",marginBottom:"12px"});
+    const moveBtn = renderBtn("Move", false, () => {
+      const opts = state.folders.map(f=>folderPath(f.id,state.folders)).join("\n");
+      const dest = prompt("Move to folder:\n"+opts);
+      if (!dest) return;
+      const target = state.folders.find(f=>folderPath(f.id,state.folders).toLowerCase()===dest.toLowerCase());
+      if (target) { setState({content:state.content.map(c=>c.id===sel.id?{...c,folderId:target.id}:c)}); }
+    }, {fontSize:"11px",padding:"4px 10px"});
+    const delBtn = el("button", {class:"btn-danger"}, "Delete");
+    delBtn.addEventListener("click", () => setState({showConfirm:{message:"Delete this content?",onYes:()=>setState({content:state.content.filter(c=>c.id!==sel.id),selectedContent:null,showConfirm:null})}}));
+    actionRow.appendChild(moveBtn);
+    actionRow.appendChild(delBtn);
+    panelBody.appendChild(actionRow);
+
+    panelBody.appendChild(el("div", {class:"section-title"}, "POSTED ON"));
+    if (!sel.posts.length) panelBody.appendChild(el("div",{style:{fontSize:"12px",color:"#9ca3af",marginBottom:"10px"}},"Not posted anywhere yet"));
+    sel.posts.forEach(p => {
+      const acc = state.accounts.find(a=>a.id===p.accountId);
+      const pCard = div("", {background:"#f9fafb",borderRadius:"8px",padding:"8px 10px",marginBottom:"6px"});
+      const pRow = div("", {display:"flex",alignItems:"center",gap:"6px",marginBottom:"5px"});
+      pRow.appendChild(renderDot(acc?.color));
+      pRow.appendChild(el("span",{style:{fontSize:"11px",fontWeight:500}},acc?.sub||""));
+      pRow.appendChild(el("span",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginLeft:"auto"}},p.date));
+      pCard.appendChild(pRow);
+      pCard.appendChild(el("div",{style:{fontSize:"10px",color:"#6b7280",fontFamily:"monospace"}},"Views "+fmt(p.views)+" Likes "+fmt(p.likes)+" ER "+pct(p.likes+p.comments,acc?.followers)));
+      panelBody.appendChild(pCard);
+    });
+
+    panelBody.appendChild(el("div", {class:"section-title",style:{marginTop:"12px"}}, "AVAILABLE FOR"));
+    state.accounts.filter(a=>!sel.posts.some(p=>state.accounts.find(x=>x.id===p.accountId)?.platform===a.platform)).forEach(a => {
+      const row = div("", {display:"flex",alignItems:"center",gap:"7px",padding:"6px 8px",border:"1px dashed #e5e7eb",borderRadius:"8px",marginBottom:"5px"});
+      row.appendChild(renderDot(a.color));
+      row.appendChild(el("span",{style:{fontSize:"11px"}},a.sub));
+      row.appendChild(el("span",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginLeft:"auto"}},a.platform));
+      panelBody.appendChild(row);
+    });
+
+    panel.appendChild(panelBody);
+    wrap.appendChild(panel);
+  }
+
+  return wrap;
+}
+
+// ── UPLOAD MODAL ──────────────────────────────────────────────────────────────
+function renderUploadModal() {
+  let selectedFile = null;
+  let selectedFolder = "";
+  let selectedSFW = "SFW";
+  let uploadStatus = "";
+
+  const overlay = div("overlay", {});
+  const modal = div("modal", {width:"420px"});
+
+  const header = div("", {display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px"});
+  header.appendChild(el("span",{style:{fontSize:"14px",fontWeight:600}},"Upload Content"));
+  const closeBtn = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"18px",color:"#9ca3af"}},"x");
+  closeBtn.addEventListener("click", () => setState({showUpload:false}));
+  header.appendChild(closeBtn);
+  modal.appendChild(header);
+
+  // Model
+  const modelRow = div("",{marginBottom:"10px"});
+  modelRow.appendChild(el("span",{class:"lbl"},"MODEL"));
+  const modelSel = renderSel(state.model==="all"?(state.models[1]?.id||""):(state.model), state.models.filter(m=>m.id!=="all").map(m=>({value:m.id,label:m.label})), v=>{});
+  modelRow.appendChild(modelSel);
+  modal.appendChild(modelRow);
+
+  // SFW/NSFW
+  const sfwRow = div("",{marginBottom:"10px"});
+  sfwRow.appendChild(el("span",{class:"lbl"},"CONTENT TYPE"));
+  const sfwWrap = div("",{display:"flex",gap:"6px"});
+  ["SFW","NSFW"].forEach(opt => {
+    const btn = el("button",{style:{flex:1,padding:"7px",border:"1.5px solid",borderColor:selectedSFW===opt?"#1c1c1e":"#e5e7eb",borderRadius:"8px",background:selectedSFW===opt?"#1c1c1e":"transparent",color:selectedSFW===opt?"#fff":"#6b7280",cursor:"pointer",fontSize:"12px",fontWeight:500}},opt);
+    btn.addEventListener("click", () => { selectedSFW=opt; sfwWrap.querySelectorAll("button").forEach((b,i)=>{ const o=["SFW","NSFW"][i]; Object.assign(b.style,{borderColor:o===opt?"#1c1c1e":"#e5e7eb",background:o===opt?"#1c1c1e":"transparent",color:o===opt?"#fff":"#6b7280"}); }); });
+    sfwWrap.appendChild(btn);
+  });
+  sfwRow.appendChild(sfwWrap);
+  modal.appendChild(sfwRow);
+
+  // Folder
+  const folderRow = div("",{marginBottom:"10px"});
+  folderRow.appendChild(el("span",{class:"lbl"},"FOLDER"));
+  const folderSel = renderSel("", state.folders.map(f=>({value:f.id,label:folderPath(f.id,state.folders)})), v=>{ selectedFolder=v; });
+  folderRow.appendChild(folderSel);
+  modal.appendChild(folderRow);
+
+  // File picker
+  const fileRow = div("",{marginBottom:"16px"});
+  fileRow.appendChild(el("span",{class:"lbl"},"FILE"));
+  const fileInp = el("input",{type:"file",class:"inp",style:{padding:"5px"}});
+  fileInp.addEventListener("change", e=>{ selectedFile=e.target.files[0]; });
+  fileRow.appendChild(fileInp);
+  modal.appendChild(fileRow);
+
+  // Status
+  const statusEl = el("div",{style:{fontSize:"12px",color:"#6b7280",marginBottom:"10px",minHeight:"18px"}});
+  modal.appendChild(statusEl);
+
+  // Upload btn
+  const upBtn = renderBtn("Upload to Drive", true, async () => {
+    if (!selectedFile) { statusEl.textContent="Please select a file."; return; }
+    if (!selectedFolder) { statusEl.textContent="Please select a folder."; return; }
+    if (!isAuthenticated()) { statusEl.textContent="Please connect Google first."; return; }
+
+    upBtn.textContent="Uploading...";
+    upBtn.disabled=true;
+    statusEl.textContent="Finding Drive folder...";
+
+    try {
+      const modelId = modelSel.value;
+      const modelObj = state.models.find(m=>m.id===modelId);
+      const modelName = modelObj?.label||"Model";
+
+      // Find model folder in Drive
+      const modelFiles = await driveListFolder(MODELS_FOLDER_ID);
+      const modelDriveFolder = modelFiles.find(f=>f.name.toLowerCase().includes(modelName.toLowerCase().replace(/\s+/g,"")||modelName.toLowerCase()));
+
+      if (!modelDriveFolder) { statusEl.textContent="Model folder not found in Drive. Create it first."; upBtn.textContent="Upload to Drive"; upBtn.disabled=false; return; }
+
+      statusEl.textContent="Finding ready folder...";
+      const readyFolderId = await syncDriveFolders(modelDriveFolder.id, selectedSFW);
+
+      // Find subfolder in ready
+      const folderObj = state.folders.find(f=>f.id===selectedFolder);
+      const subfolderName = folderObj?.name||"";
+      const readyContents = await driveListFolder(readyFolderId);
+      let subDriveFolder = readyContents.find(f=>f.name.toLowerCase().includes(subfolderName.toLowerCase()));
+      if (!subDriveFolder) {
+        const newId = await driveCreateFolder(subfolderName, readyFolderId);
+        subDriveFolder = {id:newId};
+      }
+
+      // Get parent folder name for naming
+      const parentFolder = folderObj?.parentId ? state.folders.find(f=>f.id===folderObj.parentId) : null;
+      const categoryName = parentFolder?.name||folderObj?.name||"content";
+
+      statusEl.textContent="Uploading file...";
+      const result = await uploadFile(selectedFile, subDriveFolder.id, modelName, categoryName, subfolderName, selectedSFW);
+
+      if (result) {
+        const newContent = {
+          id:"c"+Date.now(), folderId:selectedFolder, type:"Story",
+          label:result.name, uploaded:new Date().toISOString().slice(0,10),
+          icon:"f", modelId:modelId, driveId:result.driveId, driveUrl:result.driveUrl, posts:[]
+        };
+        setState({content:[...state.content,newContent],showUpload:false});
+        if (isAuthenticated()) saveToSheets();
+      } else {
+        statusEl.textContent="Upload failed. Try again.";
+        upBtn.textContent="Upload to Drive"; upBtn.disabled=false;
+      }
+    } catch(e) {
+      statusEl.textContent="Error: "+e.message;
+      upBtn.textContent="Upload to Drive"; upBtn.disabled=false;
+    }
+  });
+  modal.appendChild(upBtn);
+  overlay.appendChild(modal);
+  return overlay;
+}
+
+// ── DRAFT POST ────────────────────────────────────────────────────────────────
+function renderDraft() {
+  const f = state.draftForm;
+  const isEdit = !!state.editingDraft;
+  const wrap = div("",{display:"flex",height:"100%",overflow:"hidden"});
+  const formArea = div("content-area",{maxWidth:"560px"});
+
+  if (isEdit) {
+    const editBanner = div("",{background:"#eff6ff",color:"#1d4ed8",borderRadius:"8px",padding:"8px 14px",marginBottom:"12px",fontSize:"12px",display:"flex",alignItems:"center",justifyContent:"space-between"});
+    editBanner.appendChild(txt("Editing draft"));
+    const cancelEdit = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",color:"#1d4ed8",fontSize:"12px"}},"Cancel");
+    cancelEdit.addEventListener("click", () => setState({editingDraft:null, draftForm:{platform:"Instagram",accountId:"ig-main",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"}, draftNameOverridden:false}));
+    editBanner.appendChild(cancelEdit);
+    formArea.appendChild(editBanner);
+  }
+
+  // Post name
+  const nameCard = div("card",{marginBottom:"12px"});
+  nameCard.appendChild(el("span",{class:"lbl"},"POST NAME"));
+  const nameRow = div("",{display:"flex",gap:"6px"});
+  const nameInp = el("input",{class:"inp",style:{fontFamily:"monospace",fontSize:"11px"},value:f.name,placeholder:"Auto-generated..."});
+  nameInp.addEventListener("input", e => { state.draftForm.name=e.target.value; state.draftNameOverridden=true; });
+  const autoBtn = renderBtn("Auto", false, () => { state.draftNameOverridden=false; updateDraftName(); render(); }, {flexShrink:0,fontSize:"11px"});
+  nameRow.appendChild(nameInp);
+  nameRow.appendChild(autoBtn);
+  nameCard.appendChild(nameRow);
+  formArea.appendChild(nameCard);
+
+  // Account settings
+  const accCard = div("card",{marginBottom:"12px"});
+  const accGrid = div("grid2",{marginBottom:"10px"});
+
+  const platWrap = div("",{});
+  platWrap.appendChild(el("span",{class:"lbl"},"PLATFORM"));
+  const platSel = renderSel(f.platform, state.platforms.map(p=>({value:p.name,label:p.name})), v => {
+    state.draftForm.platform=v;
+    state.draftForm.accountId = state.accounts.find(a=>a.platform===v&&a.status==="active")?.id||"";
+    if (!state.draftNameOverridden) updateDraftName();
+    render();
+  });
+  platWrap.appendChild(platSel);
+  accGrid.appendChild(platWrap);
+
+  const accWrap2 = div("",{});
+  accWrap2.appendChild(el("span",{class:"lbl"},"ACCOUNT"));
+  const platAccs = state.accounts.filter(a=>a.platform===f.platform&&a.status==="active");
+  const accSel2 = renderSel(f.accountId, platAccs.map(a=>({value:a.id,label:a.sub+" - "+a.handle})), v => { state.draftForm.accountId=v; if(!state.draftNameOverridden) updateDraftName(); render(); });
+  accWrap2.appendChild(accSel2);
+  accGrid.appendChild(accWrap2);
+  accCard.appendChild(accGrid);
+
+  const typeGrid = div("grid3",{});
+  const typeWrap = div("",{});
+  typeWrap.appendChild(el("span",{class:"lbl"},"TYPE"));
+  const typeSel = renderSel(f.type, state.postTypes.map(t=>({value:t.id,label:t.name})), v => { state.draftForm.type=v; if(!state.draftNameOverridden) updateDraftName(); render(); });
+  typeWrap.appendChild(typeSel);
+  typeGrid.appendChild(typeWrap);
+
+  const statWrap = div("",{});
+  statWrap.appendChild(el("span",{class:"lbl"},"STATUS"));
+  const statSel = renderSel(f.status, ["draft","scheduled","posted"].map(s=>({value:s,label:s})), v=>{ state.draftForm.status=v; });
+  statWrap.appendChild(statSel);
+  typeGrid.appendChild(statWrap);
+
+  const schedWrap = div("",{});
+  schedWrap.appendChild(el("span",{class:"lbl"},"SCHEDULE"));
+  const schedInp = el("input",{type:"datetime-local",class:"inp",value:f.scheduledAt});
+  schedInp.addEventListener("change", e=>{ state.draftForm.scheduledAt=e.target.value; if(!state.draftNameOverridden) updateDraftName(); });
+  schedWrap.appendChild(schedInp);
+  typeGrid.appendChild(schedWrap);
+  accCard.appendChild(typeGrid);
+  formArea.appendChild(accCard);
+
+  // Content selection
+  const contentCard = div("card",{marginBottom:"12px"});
+  contentCard.appendChild(el("span",{class:"lbl"},"SELECT CONTENT - not used on "+f.platform));
+  const modelContent = state.model==="all"?state.content:state.content.filter(c=>c.modelId===state.model);
+  const available = modelContent.filter(c=>!c.posts.some(p=>state.accounts.find(a=>a.id===p.accountId)?.platform===f.platform));
+  if (!available.length) {
+    contentCard.appendChild(renderEmptyState("No available content","All content used on "+f.platform+".","",null));
+  } else {
+    available.forEach(c => {
+      const isPicked = f.contentIds.includes(c.id);
+      const row = div("",{display:"flex",alignItems:"center",gap:"8px",padding:"8px 10px",borderRadius:"8px",border:isPicked?"1.5px solid #1c1c1e":"1px solid #e5e7eb",background:isPicked?"#f9f9f9":"#fff",cursor:"pointer",marginBottom:"5px"});
+      row.addEventListener("click", () => {
+        state.draftForm.contentIds = isPicked ? f.contentIds.filter(x=>x!==c.id) : [...f.contentIds,c.id];
+        render();
+      });
+      const thumb = div("",{width:"28px",height:"28px",borderRadius:"6px",background:"#f3f4f6",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"10px",color:"#9ca3af",flexShrink:0});
+      thumb.appendChild(txt(c.type[0]));
+      row.appendChild(thumb);
+      const info = div("",{flex:1,minWidth:0});
+      info.appendChild(el("div",{style:{fontSize:"12px",fontWeight:500,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}},c.label));
+      info.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace"}},c.type));
+      row.appendChild(info);
+      if (isPicked) row.appendChild(el("span",{style:{fontSize:"12px",color:"#1c1c1e"}},"OK"));
+      contentCard.appendChild(row);
+    });
+  }
+  formArea.appendChild(contentCard);
+
+  // Overlays
+  if (f.contentIds.length) {
+    const overlayCard = div("card",{marginBottom:"12px"});
+    overlayCard.appendChild(el("span",{class:"lbl"},"ORDER & OVERLAYS - drag to reorder"));
+    f.contentIds.forEach((id,idx) => {
+      const c = state.content.find(x=>x.id===id);
+      const row = div("",{display:"flex",alignItems:"flex-start",gap:"8px",padding:"8px 10px",borderRadius:"8px",background:"#f9f9f9",marginBottom:"6px",border:"1px solid #f0f0f0"});
+      row.appendChild(el("span",{style:{fontSize:"12px",color:"#9ca3af",marginTop:"4px",flexShrink:0}},"::"));
+      const thumb2 = div("",{width:"26px",height:"26px",borderRadius:"6px",background:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"11px",color:"#9ca3af",flexShrink:0,border:"1px solid #f0f0f0"});
+      thumb2.appendChild(txt(c?.type[0]||""));
+      row.appendChild(thumb2);
+      const infoWrap = div("",{flex:1,minWidth:0});
+      infoWrap.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500,marginBottom:"4px",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}},"Slide "+(idx+1)+" - "+(c?.label||"")));
+      const ovInp = el("input",{class:"inp",placeholder:"Text overlay...",style:{fontSize:"11px"},value:f.overlays[id]||""});
+      ovInp.addEventListener("input", e=>{ state.draftForm.overlays[id]=e.target.value; });
+      infoWrap.appendChild(ovInp);
+      row.appendChild(infoWrap);
+      const remBtn = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",color:"#9ca3af",fontSize:"14px",marginTop:"2px"}},"x");
+      remBtn.addEventListener("click", () => { state.draftForm.contentIds=f.contentIds.filter(x=>x!==id); render(); });
+      row.appendChild(remBtn);
+      overlayCard.appendChild(row);
+    });
+    formArea.appendChild(overlayCard);
+  }
+
+  // Caption/hashtags
+  const captionCard = div("card",{marginBottom:"12px"});
+  captionCard.appendChild(el("span",{class:"lbl"},"CAPTION"));
+  const capTA = el("textarea",{class:"inp",rows:3,placeholder:"Write your caption..."});
+  capTA.value = f.caption;
+  capTA.addEventListener("input", e=>{ state.draftForm.caption=e.target.value; });
+  captionCard.appendChild(capTA);
+  captionCard.appendChild(el("span",{class:"lbl",style:{marginTop:"10px"}},"HASHTAGS"));
+  const hashInp = el("input",{class:"inp",placeholder:"#fyp #pickleball",value:f.hashtags});
+  hashInp.addEventListener("input", e=>{ state.draftForm.hashtags=e.target.value; });
+  captionCard.appendChild(hashInp);
+  formArea.appendChild(captionCard);
+
+  // Save buttons
+  const btnRow = div("",{display:"flex",gap:"8px",marginBottom:"20px"});
+  const saveBtn = renderBtn(isEdit?"Save Changes":"Save Draft", true, () => {
+    const draft = {
+      id:state.editingDraft?.id||"d"+Date.now(), name:f.name||autoName(f.platform,f.accountId,f.type,f.scheduledAt,1),
+      accountId:f.accountId, platform:f.platform, type:f.type,
+      contentIds:[...f.contentIds], overlays:f.contentIds.map(id=>f.overlays[id]||""),
+      caption:f.caption, hashtags:f.hashtags, scheduledAt:f.scheduledAt, status:f.status, postOrder:1
+    };
+    const newDrafts = isEdit ? state.drafts.map(d=>d.id===draft.id?draft:d) : [...state.drafts,draft];
+    setState({drafts:newDrafts, editingDraft:null, draftForm:{platform:"Instagram",accountId:"ig-main",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"}, draftNameOverridden:false});
+    if (isAuthenticated()) saveToSheets();
+  }, {flex:1,justifyContent:"center"});
+  const clearBtn = renderBtn(isEdit?"Cancel":"Clear", false, () => {
+    setState({editingDraft:null, draftForm:{platform:"Instagram",accountId:"ig-main",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"}, draftNameOverridden:false});
+  }, {flex:1,justifyContent:"center"});
+  btnRow.appendChild(saveBtn);
+  btnRow.appendChild(clearBtn);
+  formArea.appendChild(btnRow);
+  wrap.appendChild(formArea);
+
+  // Preview
+  const preview = div("",{width:"220px",background:"#fff",borderLeft:"1px solid #f0f0f0",overflowY:"auto",padding:"14px",flexShrink:0});
+  preview.appendChild(el("div",{style:{fontSize:"10px",fontWeight:500,marginBottom:"12px",color:"#6b7280",fontFamily:"monospace",letterSpacing:"0.06em"}},"PREVIEW"));
+  const prevCard = div("",{background:"#f9f9f9",borderRadius:"10px",padding:"12px",marginBottom:"10px"});
+  const accInfo = state.accounts.find(a=>a.id===f.accountId);
+  const accRow = div("",{display:"flex",alignItems:"center",gap:"7px",marginBottom:"10px"});
+  accRow.appendChild(el("div",{style:{width:"24px",height:"24px",borderRadius:"50%",background:f.platform==="Instagram"?"#E1306C":"#444",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"10px",color:"#fff"}},f.platform==="Instagram"?"IG":"TT"));
+  const accInfoDiv = div("",{});
+  accInfoDiv.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500}},accInfo?.handle||""));
+  accInfoDiv.appendChild(el("div",{style:{fontSize:"9px",color:"#9ca3af",fontFamily:"monospace"}},accInfo?.sub||""));
+  accRow.appendChild(accInfoDiv);
+  prevCard.appendChild(accRow);
+  if (f.contentIds.length) {
+    f.contentIds.forEach((id,idx) => {
+      const c = state.content.find(x=>x.id===id);
+      const slide = div("",{background:"#fff",borderRadius:"8px",padding:"7px 9px",border:"1px solid #f0f0f0",marginBottom:"5px"});
+      slide.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginBottom:f.overlays[id]?"4px":"0"}},"Slide "+(idx+1)));
+      if (f.overlays[id]) slide.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500,background:"rgba(0,0,0,0.06)",borderRadius:"4px",padding:"2px 6px"}},f.overlays[id]));
+      prevCard.appendChild(slide);
+    });
+  } else {
+    const empty = div("",{background:"#f0f0f0",borderRadius:"8px",height:"70px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"11px",color:"#9ca3af",marginBottom:"10px"});
+    empty.appendChild(txt("No content"));
+    prevCard.appendChild(empty);
+  }
+  if (f.caption) prevCard.appendChild(el("div",{style:{fontSize:"11px",color:"#1a1a1a",marginBottom:"4px",lineHeight:1.4}},f.caption));
+  if (f.hashtags) prevCard.appendChild(el("div",{style:{fontSize:"10px",color:"#3b82f6",fontFamily:"monospace"}},f.hashtags));
+  preview.appendChild(prevCard);
+  preview.appendChild(renderBadge(f.status));
+  if (f.scheduledAt) preview.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginTop:"5px"}},f.scheduledAt.replace("T"," ")));
+  if (f.name) {
+    const nameTag = el("div",{style:{fontSize:"9px",color:"#c4b5fd",fontFamily:"monospace",marginTop:"4px",wordBreak:"break-all",background:"#1c1c1e",borderRadius:"6px",padding:"4px 7px"}},f.name);
+    preview.appendChild(nameTag);
+  }
+  wrap.appendChild(preview);
+  return wrap;
+}
+
+function updateDraftName() {
+  if (state.draftNameOverridden) return;
+  const f = state.draftForm;
+  const order = state.drafts.filter(d=>d.accountId===f.accountId&&d.scheduledAt?.slice(0,10)===f.scheduledAt?.slice(0,10)).length + (state.editingDraft?0:1);
+  state.draftForm.name = autoName(f.platform,f.accountId,f.type,f.scheduledAt,order);
+}
+
+// ── CALENDAR ──────────────────────────────────────────────────────────────────
+function renderCalendar() {
+  const wrap = div("",{height:"100%",display:"flex",flexDirection:"column",overflow:"hidden"});
+
+  const vDate = new Date(NOW.getFullYear(), NOW.getMonth()+state.calendarMonthOffset, 1);
+  const mName = vDate.toLocaleString("default",{month:"long",year:"numeric"});
+  const dim   = new Date(vDate.getFullYear(),vDate.getMonth()+1,0).getDate();
+  const firstD= (new Date(vDate.getFullYear(),vDate.getMonth(),1).getDay()+6)%7;
+
+  const cf = state.calendarFilters;
+  const filtered = state.drafts.filter(d => {
+    return (cf.platforms.length===0||cf.platforms.includes(d.platform)) &&
+           (cf.accounts.length===0||cf.accounts.includes(d.accountId)) &&
+           (cf.types.length===0||cf.types.includes(d.type));
+  });
+
+  const postsForDay = day => filtered.filter(d => {
+    const dd = new Date(d.scheduledAt);
+    return dd.getFullYear()===vDate.getFullYear()&&dd.getMonth()===vDate.getMonth()&&dd.getDate()===day;
+  }).sort((a,b)=>new Date(a.scheduledAt)-new Date(b.scheduledAt));
+
+  // Toolbar
+  const toolbar = div("",{padding:"10px 16px",background:"#fff",borderBottom:"1px solid #f0f0f0",display:"flex",alignItems:"center",gap:"8px",flexShrink:0,flexWrap:"wrap"});
+  const prevBtn = renderBtn("<", false, () => setState({calendarMonthOffset:state.calendarMonthOffset-1}), {padding:"5px 10px"});
+  toolbar.appendChild(prevBtn);
+  toolbar.appendChild(el("span",{style:{fontSize:"13px",fontWeight:500,minWidth:"130px",textAlign:"center"}},mName));
+  const nextBtn = renderBtn(">", false, () => setState({calendarMonthOffset:state.calendarMonthOffset+1}), {padding:"5px 10px"});
+  toolbar.appendChild(nextBtn);
+  toolbar.appendChild(el("div",{style:{width:"1px",background:"#e5e7eb",height:"20px",margin:"0 4px"}}));
+  toolbar.appendChild(renderMultiSelect("Platform", state.platforms.map(p=>({id:p.name,label:p.name,color:p.color})), cf.platforms, v=>setState({calendarFilters:{...cf,platforms:v}})));
+  toolbar.appendChild(renderMultiSelect("Account", state.accounts.map(a=>({id:a.id,label:a.sub,color:a.color})), cf.accounts, v=>setState({calendarFilters:{...cf,accounts:v}})));
+  toolbar.appendChild(renderMultiSelect("Type", state.postTypes.map(t=>({id:t.id,label:t.name})), cf.types, v=>setState({calendarFilters:{...cf,types:v}})));
+
+  const legend = div("",{marginLeft:"auto",display:"flex",gap:"8px",fontSize:"10px"});
+  Object.entries(SC).forEach(([s,c])=>{ const item=div("",{display:"flex",alignItems:"center",gap:"3px",color:"#6b7280"}); item.appendChild(el("span",{class:"dot",style:{width:"7px",height:"7px",background:c}})); item.appendChild(txt(s)); legend.appendChild(item); });
+  toolbar.appendChild(legend);
+  wrap.appendChild(toolbar);
+
+  // Day headers
+  const dayHeaders = div("",{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:"4px",padding:"8px 16px 0",flexShrink:0});
+  ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].forEach(d => dayHeaders.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",textAlign:"center",paddingBottom:"4px"}},d)));
+  wrap.appendChild(dayHeaders);
+
+  // Grid
+  const calArea = div("content-area",{paddingTop:"0"});
+  const grid = div("",{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:"4px"});
+
+  for (let i=0;i<firstD;i++) grid.appendChild(div("",{minHeight:"90px"}));
+
+  for (let day=1;day<=dim;day++) {
+    const posts = postsForDay(day);
+    const isTod = day===NOW.getDate()&&vDate.getMonth()===NOW.getMonth()&&vDate.getFullYear()===NOW.getFullYear();
+    const cell = div("",{background:"#fff",border:isTod?"1.5px solid #1c1c1e":"1px solid #f0f0f0",borderRadius:"10px",padding:"6px",minHeight:"90px"});
+
+    cell.appendChild(el("div",{style:{fontSize:"10px",color:isTod?"#1c1c1e":"#9ca3af",fontFamily:"monospace",fontWeight:isTod?"600":"400",marginBottom:"4px"}},day+(isTod?" today":"")));
+
+    posts.forEach((d,pi) => {
+      const st  = getStatus(d);
+      const acc = state.accounts.find(a=>a.id===d.accountId);
+      const postEl = div("sc-"+st,{background:SBG[st],borderRadius:"4px",padding:"3px 5px",marginBottom:"3px",cursor:"pointer"});
+      const postRow = div("",{display:"flex",alignItems:"center",gap:"3px",marginBottom:"1px"});
+      postRow.appendChild(el("span",{class:"dot",style:{width:"5px",height:"5px",background:acc?.color||"#888"}}));
+      postRow.appendChild(el("span",{style:{fontSize:"9px",color:STX[st],fontFamily:"monospace",fontWeight:500}},"#"+(pi+1)+" "+d.type));
+      postEl.appendChild(postRow);
+      postEl.appendChild(el("div",{style:{fontSize:"9px",color:"#6b7280",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}},acc?.sub||""));
+      postEl.addEventListener("click", () => setState({showDraftModal:d}));
+      cell.appendChild(postEl);
+    });
+
+    cell.addEventListener("dragover", e=>e.preventDefault());
+    cell.addEventListener("drop", e=>{
+      e.preventDefault();
+      const draftId = e.dataTransfer.getData("draftId");
+      if (!draftId) return;
+      const nd = vDate.getFullYear()+"-"+String(vDate.getMonth()+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");
+      const draft = state.drafts.find(x=>x.id===draftId);
+      if (!draft) return;
+      const ot = draft.scheduledAt?.slice(11)||"08:00";
+      const ns = nd+"T"+ot;
+      const newSt = draft.status==="posted"?"posted":(new Date(ns)>NOW?"scheduled":"missed");
+      setState({drafts:state.drafts.map(x=>x.id===draftId?{...x,scheduledAt:ns,status:newSt}:x)});
+    });
+
+    grid.appendChild(cell);
+  }
+  calArea.appendChild(grid);
+  wrap.appendChild(calArea);
+
+  // Draft modal
+  if (state.showDraftModal) {
+    const d   = state.showDraftModal;
+    const st  = getStatus(d);
+    const acc = state.accounts.find(a=>a.id===d.accountId);
+    const con = (d.contentIds||[]).map(id=>state.content.find(c=>c.id===id)).filter(Boolean);
+    const past= isPast(d.scheduledAt);
+
+    const overlay = div("overlay",{});
+    overlay.addEventListener("click", () => setState({showDraftModal:null}));
+    const modal = div("modal",{width:"380px",maxHeight:"85vh",overflowY:"auto"});
+    modal.addEventListener("click", e=>e.stopPropagation());
+
+    const mHeader = div("",{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"14px"});
+    mHeader.appendChild(el("span",{style:{fontSize:"14px",fontWeight:600}},d.type+" - "+(acc?.sub||"")));
+    const mClose = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"18px",color:"#9ca3af"}},"x");
+    mClose.addEventListener("click", () => setState({showDraftModal:null}));
+    mHeader.appendChild(mClose);
+    modal.appendChild(mHeader);
+
+    // Status buttons
+    const statusSection = div("",{marginBottom:"14px"});
+    statusSection.appendChild(el("div",{class:"lbl"},"STATUS"));
+    const statusBtns = div("",{display:"flex",gap:"6px",flexWrap:"wrap"});
+    const statusOptions = past ? ["posted","missed"] : ["draft","scheduled","posted"];
+    statusOptions.forEach(s => {
+      const isActive = st===s;
+      const sBtn = el("button",{style:{padding:"5px 14px",borderRadius:"20px",border:"1.5px solid",borderColor:isActive?SC[s]:"#e5e7eb",background:isActive?SBG[s]:"transparent",color:isActive?STX[s]:"#9ca3af",fontSize:"11px",fontWeight:isActive?"600":"400",cursor:"pointer",fontFamily:"monospace"}},s);
+      sBtn.addEventListener("click", () => {
+        setState({drafts:state.drafts.map(x=>x.id===d.id?{...x,status:s}:x), showDraftModal:{...d,status:s}});
+        if (isAuthenticated()) saveToSheets();
+      });
+      statusBtns.appendChild(sBtn);
+    });
+    statusSection.appendChild(statusBtns);
+    modal.appendChild(statusSection);
+
+    // Date/time
+    const dtSection = div("",{marginBottom:"14px"});
+    dtSection.appendChild(el("span",{class:"lbl"},"DATE AND TIME"));
+    const dtInp = el("input",{type:"datetime-local",class:"inp",value:d.scheduledAt});
+    dtInp.addEventListener("blur", e=>{
+      const ns = e.target.value;
+      if (!ns) return;
+      const newSt = d.status==="posted"?"posted":(new Date(ns)>NOW?"scheduled":"missed");
+      setState({drafts:state.drafts.map(x=>x.id===d.id?{...x,scheduledAt:ns,status:newSt}:x), showDraftModal:{...d,scheduledAt:ns,status:newSt}});
+    });
+    dtSection.appendChild(dtInp);
+    modal.appendChild(dtSection);
+
+    // Content
+    modal.appendChild(el("div",{class:"section-title"},"CONTENT"));
+    con.forEach((c,i) => {
+      const cRow = div("",{display:"flex",alignItems:"center",gap:"8px",background:"#f9f9f9",borderRadius:"8px",padding:"7px 10px",marginBottom:"5px"});
+      cRow.appendChild(el("span",{style:{fontSize:"14px"}},c.type[0]));
+      const cInfo = div("",{flex:1});
+      cInfo.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500}},c.label));
+      if (d.overlays[i]) cInfo.appendChild(el("div",{style:{fontSize:"10px",color:"#6b7280",fontFamily:"monospace",marginTop:"2px"}},'"'+d.overlays[i]+'"'));
+      cRow.appendChild(cInfo);
+      modal.appendChild(cRow);
+    });
+
+    if (d.caption) { modal.appendChild(el("div",{class:"section-title",style:{marginTop:"12px"}},"CAPTION")); modal.appendChild(el("div",{style:{fontSize:"12px",color:"#374151",lineHeight:1.4,marginBottom:"6px"}},d.caption)); }
+    if (d.hashtags) modal.appendChild(el("div",{style:{fontSize:"11px",color:"#3b82f6",fontFamily:"monospace",marginBottom:"12px"}},d.hashtags));
+
+    const mBtns = div("",{display:"flex",gap:"8px",marginTop:"16px"});
+    const editBtn = renderBtn("Edit Draft", false, () => {
+      const overlaysObj = {};
+      (d.contentIds||[]).forEach((id,i)=>{ overlaysObj[id]=d.overlays[i]||""; });
+      setState({editingDraft:d, draftForm:{platform:d.platform,accountId:d.accountId,type:d.type,contentIds:[...d.contentIds],overlays:overlaysObj,caption:d.caption,hashtags:d.hashtags,scheduledAt:d.scheduledAt,name:d.name,status:d.status}, draftNameOverridden:true, tab:"draft", showDraftModal:null});
+    }, {flex:1,justifyContent:"center",fontSize:"11px"});
+    const dlBtn = renderBtn("Download", false, () => {}, {flex:1,justifyContent:"center",fontSize:"11px"});
+    const doneBtn = renderBtn("Done", true, () => setState({showDraftModal:null}), {flex:1,justifyContent:"center",fontSize:"11px"});
+    mBtns.appendChild(editBtn);
+    mBtns.appendChild(dlBtn);
+    mBtns.appendChild(doneBtn);
+    modal.appendChild(mBtns);
+    overlay.appendChild(modal);
+    wrap.appendChild(overlay);
+  }
+
+  return wrap;
+}
+
+// ── METRICS ───────────────────────────────────────────────────────────────────
+function renderMetrics() {
+  const wrap = div("",{height:"100%",display:"flex",flexDirection:"column",overflow:"hidden"});
+  const mf = state.metricsFilters;
+
+  const allPosts = state.content.flatMap(c =>
+    c.posts.filter(p => {
+      const acc = state.accounts.find(a=>a.id===p.accountId);
+      return (mf.accounts.length===0||mf.accounts.includes(p.accountId)) &&
+             (mf.types.length===0||mf.types.includes(c.type)) &&
+             (mf.platforms.length===0||mf.platforms.includes(acc?.platform));
+    }).map(p=>({...p, content:c, acc:state.accounts.find(a=>a.id===p.accountId)}))
+  );
+
+  const sorted = [...allPosts].sort((a,b)=>{
+    let av,bv;
+    if(state.metricsSortBy==="date"){av=new Date(a.date);bv=new Date(b.date);}
+    else if(state.metricsSortBy==="views"){av=a.views;bv=b.views;}
+    else if(state.metricsSortBy==="likes"){av=a.likes;bv=b.likes;}
+    else if(state.metricsSortBy==="comments"){av=a.comments;bv=b.comments;}
+    else{av=(a.likes+a.comments)/(a.acc?.followers||1);bv=(b.likes+b.comments)/(b.acc?.followers||1);}
+    return state.metricsSortDir==="desc"?bv-av:av-bv;
+  });
+
+  const selAccs = mf.accounts.length ? mf.accounts : state.accounts.map(a=>a.id);
+  const totF = selAccs.reduce((s,id)=>s+(state.accounts.find(a=>a.id===id)?.followers||0),0);
+  const totV = allPosts.reduce((s,p)=>s+p.views,0);
+  const totL = allPosts.reduce((s,p)=>s+p.likes,0);
+  const totC = allPosts.reduce((s,p)=>s+p.comments,0);
+  const avgER = allPosts.length ? ((totL+totC)/(totF*allPosts.length)*100).toFixed(1)+"%" : "--";
+
+  // Toolbar
+  const toolbar = div("",{padding:"10px 16px",background:"#fff",borderBottom:"1px solid #f0f0f0",display:"flex",alignItems:"center",gap:"8px",flexShrink:0,flexWrap:"wrap"});
+  toolbar.appendChild(renderMultiSelect("Platform", state.platforms.map(p=>({id:p.name,label:p.name,color:p.color})), mf.platforms, v=>setState({metricsFilters:{...mf,platforms:v}})));
+  toolbar.appendChild(renderMultiSelect("Account", state.accounts.map(a=>({id:a.id,label:a.sub,color:a.color})), mf.accounts, v=>setState({metricsFilters:{...mf,accounts:v}})));
+  toolbar.appendChild(renderMultiSelect("Type", state.postTypes.map(t=>({id:t.id,label:t.name})), mf.types, v=>setState({metricsFilters:{...mf,types:v}})));
+
+  const sortWrap = div("",{marginLeft:"auto",display:"flex",gap:"6px",alignItems:"center"});
+  sortWrap.appendChild(el("span",{style:{fontSize:"11px",color:"#9ca3af"}},"Sort:"));
+  const sortSel = renderSel(state.metricsSortBy, [{value:"date",label:"Date"},{value:"views",label:"Views"},{value:"likes",label:"Likes"},{value:"comments",label:"Comments"},{value:"er",label:"Eng. Rate"}], v=>setState({metricsSortBy:v}));
+  Object.assign(sortSel.style,{width:"auto",padding:"4px 10px",fontSize:"11px"});
+  sortWrap.appendChild(sortSel);
+  const dirBtn = renderBtn(state.metricsSortDir==="desc"?"Desc":"Asc", false, ()=>setState({metricsSortDir:state.metricsSortDir==="desc"?"asc":"desc"}), {fontSize:"11px",padding:"4px 10px"});
+  sortWrap.appendChild(dirBtn);
+  toolbar.appendChild(sortWrap);
+  wrap.appendChild(toolbar);
+
+  const area = div("content-area",{});
+
+  // Stats
+  const statsRow = div("",{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"10px",marginBottom:"14px"});
+  [["Followers",totF.toLocaleString()],["Views",fmt(totV)],["Likes",fmt(totL)],["Comments",fmt(totC)],["Avg ER",avgER]].forEach(([l,v])=>{
+    const card = div("card",{padding:"10px 12px"});
+    card.appendChild(el("div",{style:{fontSize:"20px",fontWeight:600,fontFamily:"monospace"}},v));
+    card.appendChild(el("div",{style:{fontSize:"11px",color:"#9ca3af",marginTop:"2px"}},l));
+    statsRow.appendChild(card);
+  });
+  area.appendChild(statsRow);
+
+  // Follower counts
+  const followerCard = div("card",{marginBottom:"14px"});
+  followerCard.appendChild(el("div",{class:"section-title"},"FOLLOWER COUNTS"));
+  const followerRow = div("",{display:"flex",gap:"8px",flexWrap:"wrap"});
+  selAccs.forEach(id=>{
+    const acc = state.accounts.find(a=>a.id===id);
+    if (!acc) return;
+    const row = div("",{display:"flex",alignItems:"center",gap:"7px",padding:"6px 12px",background:"#f9f9f9",borderRadius:"8px",flex:1,minWidth:"120px"});
+    row.appendChild(renderDot(acc.color));
+    const info = div("",{flex:1});
+    info.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500}},acc.sub));
+    info.appendChild(el("div",{style:{fontSize:"12px",fontFamily:"monospace"}},acc.followers.toLocaleString()));
+    row.appendChild(info);
+    const editBtn = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"11px",color:"#9ca3af"}},"edit");
+    editBtn.addEventListener("click",()=>setState({showMetricsUpdate:{accountId:id,content:{id:"dummy"},views:0,likes:0,comments:0}}));
+    row.appendChild(editBtn);
+    followerRow.appendChild(row);
+  });
+  followerCard.appendChild(followerRow);
+  area.appendChild(followerCard);
+
+  // Posts grid
+  if (!sorted.length) {
+    area.appendChild(renderEmptyState("No posts found","Adjust your filters to see posts.","",null));
+  } else {
+    const grid = div("",{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:"10px"});
+    sorted.forEach(p=>{
+      const er = pct(p.likes+p.comments,p.acc?.followers);
+      const rr = pct(p.views,p.acc?.followers);
+      const card = div("card",{});
+      const thumb = div("",{width:"100%",aspectRatio:"4/3",borderRadius:"8px",background:"#f8f8f7",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"11px",color:"#9ca3af",marginBottom:"8px"});
+      thumb.appendChild(txt(p.content.type));
+      card.appendChild(thumb);
+      card.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"3px"}},p.content.type+" - "+p.date));
+      card.appendChild(el("div",{style:{fontSize:"12px",fontWeight:500,lineHeight:1.3,marginBottom:"7px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}},p.content.label));
+      const accRow = div("",{display:"flex",alignItems:"center",gap:"5px",marginBottom:"8px"});
+      accRow.appendChild(renderDot(p.acc?.color));
+      accRow.appendChild(el("span",{style:{fontSize:"10px",color:"#6b7280"}},p.acc?.sub||""));
+      card.appendChild(accRow);
+      const metricsGrid = div("grid3",{marginBottom:"6px"});
+      [["Views",fmt(p.views)],["Likes",fmt(p.likes)],["Cmts",fmt(p.comments)]].forEach(([ic,v])=>{
+        const m = div("",{background:"#f9f9f9",borderRadius:"6px",padding:"5px 4px",textAlign:"center"});
+        m.appendChild(el("div",{style:{fontSize:"9px",color:"#9ca3af"}},ic));
+        m.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500,fontFamily:"monospace"}},v));
+        metricsGrid.appendChild(m);
+      });
+      card.appendChild(metricsGrid);
+      const rates = div("",{display:"flex",gap:"5px",marginBottom:"8px"});
+      const erDiv = div("",{flex:1,background:"#f0fdf4",borderRadius:"6px",padding:"4px 6px",textAlign:"center"});
+      erDiv.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500,color:"#15803d",fontFamily:"monospace"}},er));
+      erDiv.appendChild(el("div",{style:{fontSize:"9px",color:"#15803d"}},"eng rate"));
+      const rrDiv = div("",{flex:1,background:"#eff6ff",borderRadius:"6px",padding:"4px 6px",textAlign:"center"});
+      rrDiv.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500,color:"#1d4ed8",fontFamily:"monospace"}},rr));
+      rrDiv.appendChild(el("div",{style:{fontSize:"9px",color:"#1d4ed8"}},"reach rate"));
+      rates.appendChild(erDiv);
+      rates.appendChild(rrDiv);
+      card.appendChild(rates);
+      const updBtn = renderBtn("Update metrics", false, ()=>setState({showMetricsUpdate:p}), {width:"100%",justifyContent:"center",fontSize:"11px"});
+      card.appendChild(updBtn);
+      grid.appendChild(card);
+    });
+    area.appendChild(grid);
+  }
+  wrap.appendChild(area);
+
+  // Update metrics modal
+  if (state.showMetricsUpdate) {
+    const p = state.showMetricsUpdate;
+    const overlay = div("overlay",{});
+    const modal = div("modal",{width:"300px"});
+    const mHeader = div("",{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px"});
+    mHeader.appendChild(el("span",{style:{fontSize:"14px",fontWeight:600}},"Update Metrics"));
+    const mc = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"18px",color:"#9ca3af"}},"x");
+    mc.addEventListener("click",()=>setState({showMetricsUpdate:null}));
+    mHeader.appendChild(mc);
+    modal.appendChild(mHeader);
+
+    const fields = {};
+    const acc = state.accounts.find(a=>a.id===p.accountId);
+    [{l:"VIEWS",k:"views",v:p.views||0},{l:"LIKES",k:"likes",v:p.likes||0},{l:"COMMENTS",k:"comments",v:p.comments||0},{l:"FOLLOWERS",k:"followers",v:acc?.followers||0}].forEach(f=>{
+      const row = div("",{marginBottom:"10px"});
+      row.appendChild(el("span",{class:"lbl"},f.l));
+      const inp = el("input",{type:"number",class:"inp",value:f.v});
+      fields[f.k] = inp;
+      row.appendChild(inp);
+      modal.appendChild(row);
+    });
+
+    const saveBtn = renderBtn("Save", true, ()=>{
+      const views    = parseInt(fields.views.value)||0;
+      const likes    = parseInt(fields.likes.value)||0;
+      const comments = parseInt(fields.comments.value)||0;
+      const followers= parseInt(fields.followers.value)||0;
+      if (p.content.id !== "dummy") {
+        setState({content:state.content.map(c=>{
+          if(c.id!==p.content.id) return c;
+          return {...c,posts:c.posts.map(pp=>pp.accountId===p.accountId?{...pp,views,likes,comments}:pp)};
+        }), accounts:state.accounts.map(a=>a.id===p.accountId?{...a,followers}:a), showMetricsUpdate:null});
+      } else {
+        setState({accounts:state.accounts.map(a=>a.id===p.accountId?{...a,followers}:a), showMetricsUpdate:null});
+      }
+      if (isAuthenticated()) saveToSheets();
+    }, {width:"100%",justifyContent:"center",marginTop:"6px"});
+    modal.appendChild(saveBtn);
+    overlay.appendChild(modal);
+    wrap.appendChild(overlay);
+  }
+
+  return wrap;
+}
+
+// ── SETTINGS ──────────────────────────────────────────────────────────────────
+function renderSettings() {
+  const overlay = div("overlay",{});
+  overlay.addEventListener("click", () => setState({showSettings:false}));
+  const modal = div("modal",{width:"460px",maxHeight:"80vh",overflowY:"auto"});
+  modal.addEventListener("click", e=>e.stopPropagation());
+
+  const header = div("",{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"20px"});
+  header.appendChild(el("span",{style:{fontSize:"15px",fontWeight:600}},"Settings"));
+  const closeBtn = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"18px",color:"#9ca3af"}},"x");
+  closeBtn.addEventListener("click",()=>setState({showSettings:false}));
+  header.appendChild(closeBtn);
+  modal.appendChild(header);
+
+  // Models
+  const addSection = (title, items, renderItem, addForm) => {
+    const section = div("",{marginBottom:"24px"});
+    section.appendChild(el("div",{style:{fontSize:"12px",fontWeight:600,color:"#374151",marginBottom:"12px",letterSpacing:"0.04em"}},title));
+    items.forEach(item => section.appendChild(renderItem(item)));
+    section.appendChild(addForm);
+    modal.appendChild(section);
+  };
+
+  // Models section
+  const modelsSection = div("",{marginBottom:"24px"});
+  modelsSection.appendChild(el("div",{style:{fontSize:"12px",fontWeight:600,color:"#374151",marginBottom:"12px",letterSpacing:"0.04em"}},"MODELS"));
+  state.models.filter(m=>m.id!=="all").forEach(m=>{
+    const row = div("",{display:"flex",alignItems:"center",gap:"10px",padding:"8px 12px",background:"#f9f9f9",borderRadius:"8px",marginBottom:"6px"});
+    row.appendChild(el("span",{style:{flex:1,fontSize:"13px"}},m.label));
+    const delBtn = el("button",{class:"btn-danger"},"Delete");
+    delBtn.addEventListener("click",()=>{
+      setState({showConfirm:{message:"Delete model "+m.label+"?",onYes:()=>setState({models:state.models.filter(x=>x.id!==m.id),showConfirm:null})}});
+    });
+    row.appendChild(delBtn);
+    modelsSection.appendChild(row);
+  });
+  const modelAddRow = div("",{display:"flex",gap:"6px"});
+  const modelInp = el("input",{class:"inp",placeholder:"Model name...",style:{flex:1}});
+  const modelAddBtn = renderBtn("Add", true, ()=>{
+    const v=modelInp.value.trim();
+    if(!v) return;
+    const id = "m-"+Date.now();
+    setState({models:[...state.models,{id,label:v}]});
+    modelInp.value="";
+    if (isAuthenticated()) saveToSheets();
+    // Create Drive folder
+    if (isAuthenticated()) createModelInDrive(v).then(result=>{
+      if(result) console.log("Created Drive folder:",result.folderName);
+    });
+  });
+  modelAddRow.appendChild(modelInp);
+  modelAddRow.appendChild(modelAddBtn);
+  modelsSection.appendChild(modelAddRow);
+  modal.appendChild(modelsSection);
+
+  // Platforms section
+  const platSection = div("",{marginBottom:"24px"});
+  platSection.appendChild(el("div",{style:{fontSize:"12px",fontWeight:600,color:"#374151",marginBottom:"12px",letterSpacing:"0.04em"}},"PLATFORMS"));
+  state.platforms.forEach(p=>{
+    const row = div("",{display:"flex",alignItems:"center",gap:"10px",padding:"8px 12px",background:"#f9f9f9",borderRadius:"8px",marginBottom:"6px"});
+    row.appendChild(renderDot(p.color,10));
+    row.appendChild(el("span",{style:{flex:1,fontSize:"13px"}},p.name));
+    const delBtn = el("button",{class:"btn-danger"},"Delete");
+    delBtn.addEventListener("click",()=>{
+      setState({showConfirm:{message:"Delete platform "+p.name+"?",onYes:()=>setState({platforms:state.platforms.filter(x=>x.id!==p.id),showConfirm:null})}});
+    });
+    row.appendChild(delBtn);
+    platSection.appendChild(row);
+  });
+  const platAddRow = div("",{display:"flex",gap:"6px",alignItems:"center"});
+  const platInp = el("input",{class:"inp",placeholder:"Platform name...",style:{flex:1}});
+  const colorInp = el("input",{type:"color",style:{width:"36px",height:"36px",borderRadius:"8px",border:"1px solid #e5e7eb",cursor:"pointer",padding:"2px"}});
+  colorInp.value = "#888888";
+  const platAddBtn = renderBtn("Add", true, ()=>{
+    const v=platInp.value.trim();
+    if(!v) return;
+    setState({platforms:[...state.platforms,{id:"plat-"+Date.now(),name:v,color:colorInp.value}]});
+    platInp.value="";
+    if (isAuthenticated()) saveToSheets();
+  });
+  platAddRow.appendChild(platInp);
+  platAddRow.appendChild(colorInp);
+  platAddRow.appendChild(platAddBtn);
+  platSection.appendChild(platAddRow);
+  modal.appendChild(platSection);
+
+  // Post types section
+  const typeSection = div("",{marginBottom:"24px"});
+  typeSection.appendChild(el("div",{style:{fontSize:"12px",fontWeight:600,color:"#374151",marginBottom:"12px",letterSpacing:"0.04em"}},"POST TYPES"));
+  const typePills = div("",{display:"flex",flexWrap:"wrap",gap:"6px",marginBottom:"12px"});
+  state.postTypes.forEach(t=>{
+    const pill = div("",{display:"inline-flex",alignItems:"center",gap:"6px",padding:"5px 10px",background:"#f3f4f6",borderRadius:"20px"});
+    pill.appendChild(el("span",{style:{fontSize:"12px",color:"#374151"}},t.name));
+    const delBtn = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"11px",color:"#9ca3af",padding:0,lineHeight:1}},"x");
+    delBtn.addEventListener("click",()=>{
+      setState({showConfirm:{message:"Delete post type "+t.name+"?",onYes:()=>setState({postTypes:state.postTypes.filter(x=>x.id!==t.id),showConfirm:null})}});
+    });
+    pill.appendChild(delBtn);
+    typePills.appendChild(pill);
+  });
+  typeSection.appendChild(typePills);
+  const typeAddRow = div("",{display:"flex",gap:"6px"});
+  const typeInp = el("input",{class:"inp",placeholder:"Post type name...",style:{flex:1}});
+  const typeAddBtn = renderBtn("Add", true, ()=>{
+    const v=typeInp.value.trim();
+    if(!v) return;
+    setState({postTypes:[...state.postTypes,{id:v,name:v}]});
+    typeInp.value="";
+    if (isAuthenticated()) saveToSheets();
+  });
+  typeAddRow.appendChild(typeInp);
+  typeAddRow.appendChild(typeAddBtn);
+  typeSection.appendChild(typeAddRow);
+  modal.appendChild(typeSection);
+
+  overlay.appendChild(modal);
+  return overlay;
+}
+
+// ── ACCOUNT MODALS ────────────────────────────────────────────────────────────
+function renderEditAccountModal(account) {
+  const form = {...account};
+  const overlay = div("overlay",{});
+  const modal = div("modal",{width:"320px"});
+  const header = div("",{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px"});
+  header.appendChild(el("span",{style:{fontSize:"14px",fontWeight:600}},"Edit Account"));
+  const closeBtn = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"18px",color:"#9ca3af"}},"x");
+  closeBtn.addEventListener("click",()=>setState({showEditAccount:null}));
+  header.appendChild(closeBtn);
+  modal.appendChild(header);
+
+  const fields = {};
+  [{l:"DISPLAY NAME",k:"sub"},{l:"HANDLE",k:"handle"},{l:"FOLLOWERS",k:"followers"}].forEach(f=>{
+    const row = div("",{marginBottom:"10px"});
+    row.appendChild(el("span",{class:"lbl"},f.l));
+    const inp = el("input",{class:"inp",value:form[f.k]||""});
+    inp.addEventListener("input",e=>{form[f.k]=e.target.value;});
+    fields[f.k]=inp;
+    row.appendChild(inp);
+    modal.appendChild(row);
+  });
+
+  const platRow = div("",{marginBottom:"10px"});
+  platRow.appendChild(el("span",{class:"lbl"},"PLATFORM"));
+  const platSel = renderSel(form.platform, state.platforms.map(p=>({value:p.name,label:p.name})), v=>{form.platform=v;});
+  platRow.appendChild(platSel);
+  modal.appendChild(platRow);
+
+  const statRow = div("",{marginBottom:"16px"});
+  statRow.appendChild(el("span",{class:"lbl"},"STATUS"));
+  const statSel = renderSel(form.status, [{value:"active",label:"Active"},{value:"inactive",label:"Inactive"}], v=>{form.status=v;});
+  statRow.appendChild(statSel);
+  modal.appendChild(statRow);
+
+  const btnRow = div("",{display:"flex",gap:"8px"});
+  const saveBtn = renderBtn("Save", true, ()=>{
+    form.followers = parseInt(fields.followers.value)||0;
+    form.sub = fields.sub.value;
+    form.handle = fields.handle.value;
+    form.platform = platSel.value;
+    form.status = statSel.value;
+    setState({accounts:state.accounts.map(a=>a.id===form.id?form:a),showEditAccount:null});
+    if (isAuthenticated()) saveToSheets();
+  }, {flex:1,justifyContent:"center"});
+  const delBtn = renderBtn("Delete", false, ()=>{
+    setState({showConfirm:{message:"Delete account "+account.sub+"?",onYes:()=>setState({accounts:state.accounts.filter(a=>a.id!==account.id),showEditAccount:null,showConfirm:null})},showEditAccount:null});
+  }, {flex:1,justifyContent:"center",color:"#ef4444",borderColor:"#fecaca"});
+  btnRow.appendChild(saveBtn);
+  btnRow.appendChild(delBtn);
+  modal.appendChild(btnRow);
+  overlay.appendChild(modal);
+  return overlay;
+}
+
+function renderAddAccountModal() {
+  const form = {handle:"",sub:"",platform:state.platforms[0]?.name||"Instagram",followers:0,status:"active",color:"#E1306C",modelId:state.model==="all"?(state.models[1]?.id||""):state.model};
+  const overlay = div("overlay",{});
+  const modal = div("modal",{width:"320px"});
+  const header = div("",{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px"});
+  header.appendChild(el("span",{style:{fontSize:"14px",fontWeight:600}},"Add Account"));
+  const closeBtn = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"18px",color:"#9ca3af"}},"x");
+  closeBtn.addEventListener("click",()=>setState({showAddAccount:false}));
+  header.appendChild(closeBtn);
+  modal.appendChild(header);
+
+  const fields = {};
+  [{l:"DISPLAY NAME",k:"sub",ph:"e.g. IG Main"},{l:"HANDLE",k:"handle",ph:"@handle"},{l:"FOLLOWERS",k:"followers",ph:"0"}].forEach(f=>{
+    const row = div("",{marginBottom:"10px"});
+    row.appendChild(el("span",{class:"lbl"},f.l));
+    const inp = el("input",{class:"inp",placeholder:f.ph,value:form[f.k]||""});
+    inp.addEventListener("input",e=>{form[f.k]=e.target.value;});
+    fields[f.k]=inp;
+    row.appendChild(inp);
+    modal.appendChild(row);
+  });
+
+  const platRow = div("",{marginBottom:"10px"});
+  platRow.appendChild(el("span",{class:"lbl"},"PLATFORM"));
+  const platSel = renderSel(form.platform, state.platforms.map(p=>({value:p.name,label:p.name})), v=>{
+    form.platform=v;
+    const pl=state.platforms.find(p=>p.name===v);
+    form.color=pl?.color||"#888";
+  });
+  platRow.appendChild(platSel);
+  modal.appendChild(platRow);
+
+  const saveBtn = renderBtn("Add Account", true, ()=>{
+    form.followers=parseInt(fields.followers.value)||0;
+    form.sub=fields.sub.value;
+    form.handle=fields.handle.value;
+    if (!form.sub||!form.handle) return;
+    const newAcc = {...form, id:"acc-"+Date.now()};
+    setState({accounts:[...state.accounts,newAcc],showAddAccount:false});
+    if (isAuthenticated()) saveToSheets();
+  }, {width:"100%",justifyContent:"center",marginTop:"6px"});
+  modal.appendChild(saveBtn);
+  overlay.appendChild(modal);
+  return overlay;
+}
+
+// ── MAIN APP ──────────────────────────────────────────────────────────────────
+function renderApp() {
+  const app = div("app",{});
+  app.appendChild(renderSidebar());
+
+  const main = div("main",{});
+
+  // Topbar
+  const topbar = div("topbar",{});
+  const tabTitles = {library:"Content Library",draft:"Draft Post",calendar:"Calendar",metrics:"Metrics"};
+  const titleWrap = div("",{});
+  titleWrap.appendChild(el("div",{style:{fontSize:"15px",fontWeight:600,color:"#1a1a1a"}},tabTitles[state.tab]||""));
+  titleWrap.appendChild(el("div",{style:{fontSize:"11px",color:"#9ca3af",marginTop:"1px"}},state.models.find(m=>m.id===state.model)?.label||""));
+  topbar.appendChild(titleWrap);
+
+  const topBtns = div("",{display:"flex",gap:"8px"});
+  const uploadBtn = renderBtn("Quick Upload", false, ()=>setState({showUpload:true}));
+  const draftBtn  = renderBtn("+ Draft Post", true, ()=>setState({tab:"draft",editingDraft:null,draftForm:{platform:"Instagram",accountId:"ig-main",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},draftNameOverridden:false}));
+  topBtns.appendChild(uploadBtn);
+  topBtns.appendChild(draftBtn);
+  topbar.appendChild(topBtns);
+  main.appendChild(topbar);
+
+  // Tab content
+  const content = div("",{flex:1,overflow:"hidden"});
+  if (state.tab==="library")  content.appendChild(renderLibrary());
+  if (state.tab==="draft")    content.appendChild(renderDraft());
+  if (state.tab==="calendar") content.appendChild(renderCalendar());
+  if (state.tab==="metrics")  content.appendChild(renderMetrics());
+  main.appendChild(content);
+  app.appendChild(main);
+
+  // Modals
+  if (state.showSettings)     app.appendChild(renderSettings());
+  if (state.showConfirm)      app.appendChild(renderConfirm(state.showConfirm.message, state.showConfirm.onYes, ()=>setState({showConfirm:null})));
+  if (state.showEditAccount)  app.appendChild(renderEditAccountModal(state.showEditAccount));
+  if (state.showAddAccount)   app.appendChild(renderAddAccountModal());
+  if (state.showUpload)       app.appendChild(renderUploadModal());
+
+  return app;
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+render();
+</script>
+</body>
+</html>
