@@ -101,8 +101,7 @@ let state = {
     {id:"f5",   name:"Seasonal",     parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
     {id:"f6",   name:"Filler",       parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
     {id:"f6a",  name:"pickleball",   parentId:"f6",   sfwNsfw:"SFW",  driveId:null},
-    {id:"f7",   name:"TikTok Quotes",parentId:null,   sfwNsfw:null,   driveId:null},
-    {id:"f8",   name:"Carousels",    parentId:null,   sfwNsfw:null,   driveId:null},
+    // TikTok Quotes and Carousels removed - not part of content library
   ],
   content: [],
   drafts:  [],
@@ -213,6 +212,8 @@ function checkAuthCallback() {
 }
 
 function disconnectGoogle() {
+  localStorage.removeItem("cs_token");
+  localStorage.removeItem("cs_token_expiry");
   setState({token: null, tokenExpiry: null});
 }
 
@@ -524,9 +525,17 @@ async function scanDrive(modelId) {
                 if (file.mimeType==="application/vnd.google-apps.folder") continue;
                 if (existingDriveIds.has(file.id)) continue;
                 const fileDetails = await fetch("https://www.googleapis.com/drive/v3/files/"+file.id+"?fields=id,name,webViewLink,thumbnailLink",{headers:{Authorization:"Bearer "+state.token}}).then(r=>r.json());
+                // Determine best folder ID from filename e.g. LillyRose_selfie_bathroom_0001
+                const parts = file.name.replace(/\.[^.]+$/,"").split("_");
+                let bestFolderId = appSubFolder?.id||appCatFolder?.id||"f1";
+                if (parts.length >= 3) {
+                  const subName = parts[2].toLowerCase();
+                  const matchedSub = state.folders.find(f=>f.name.toLowerCase()===subName&&f.parentId===appCatFolder?.id);
+                  if (matchedSub) bestFolderId = matchedSub.id;
+                }
                 newContent.push({
                   id:"c"+Date.now()+Math.random().toString(36).slice(2,8),
-                  folderId:appSubFolder?.id||appCatFolder?.id||"f1",
+                  folderId:bestFolderId,
                   type:"", label:file.name,
                   uploaded:new Date().toISOString().slice(0,10),
                   icon:"f", modelId, sfwNsfw,
@@ -763,7 +772,8 @@ function renderSidebar() {
   if (isAuthenticated()) {
     const syncWrap = div("", {display:"flex",alignItems:"center",justifyContent:"space-between"});
     const syncClass = state.syncing ? "sync-indicator syncing" : state.syncError ? "sync-indicator error" : "sync-indicator";
-    const syncText = state.syncing ? "Syncing..." : state.syncError ? "Sync error" : state.lastSynced ? "Synced "+state.lastSynced : "Connected";
+    const expiryMins = state.tokenExpiry ? Math.max(0,Math.round((new Date(state.tokenExpiry)-new Date())/60000)) : 0;
+    const syncText = state.syncing ? "Syncing..." : state.syncError ? "Sync error" : state.lastSynced ? "Synced "+state.lastSynced+" ("+expiryMins+"m)" : "Connected ("+expiryMins+"m)";
     syncWrap.appendChild(el("span", {class:syncClass}, syncText));
     const syncBtns = div("", {display:"flex",gap:"4px"});
     const saveBtn = el("button", {style:{fontSize:"10px",padding:"2px 8px",border:"1px solid rgba(255,255,255,0.2)",borderRadius:"6px",background:"transparent",color:"#9ca3af",cursor:"pointer"}}, "Save");
@@ -876,9 +886,9 @@ function renderLibrary() {
     row.appendChild(fBtn);
 
     if (!isLocked) {
-      const gearBtn = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",color:"#9ca3af",fontSize:"10px",padding:"2px 4px",opacity:0,transition:"opacity 0.1s"}}, "...");
-      row.addEventListener("mouseenter",()=>gearBtn.style.opacity="1");
-      row.addEventListener("mouseleave",()=>gearBtn.style.opacity="0");
+      const gearBtn = el("button",{style:{border:"none",background:"#f3f4f6",cursor:"pointer",color:"#6b7280",fontSize:"10px",padding:"1px 6px",borderRadius:"4px",opacity:0,transition:"opacity 0.15s",flexShrink:0}}, "...");
+      row.addEventListener("mouseenter",()=>{ gearBtn.style.opacity="1"; });
+      row.addEventListener("mouseleave",()=>{ gearBtn.style.opacity="0"; });
       gearBtn.addEventListener("click",e=>{
         e.stopPropagation();
         const menu = div("",{position:"fixed",background:"#fff",border:"1px solid #e5e7eb",borderRadius:"8px",boxShadow:"0 4px 16px rgba(0,0,0,0.1)",zIndex:999,minWidth:"140px",padding:"4px"});
@@ -985,6 +995,22 @@ function renderLibrary() {
     if (state.model==="all") { alert("Select a specific model first."); return; }
     scanDrive(state.model);
   });
+  const reassignBtn = renderBtn("Fix Folders", false, () => {
+    let fixed = 0;
+    const updatedContent = state.content.map(c => {
+      const parts = c.label.replace(/\.[^.]+$/,"").split("_");
+      if (parts.length < 3) return c;
+      const catName = parts[1].toLowerCase();
+      const subName = parts[2].toLowerCase();
+      const catFolder = state.folders.find(f=>f.name.toLowerCase()===catName&&!f.parentId||f.name.toLowerCase()===catName);
+      const subFolder = catFolder ? state.folders.find(f=>f.name.toLowerCase()===subName&&f.parentId===catFolder.id) : null;
+      if (subFolder && subFolder.id !== c.folderId) { fixed++; return {...c, folderId:subFolder.id}; }
+      return c;
+    });
+    setState({content:updatedContent});
+    if (isAuthenticated()) saveToSheets();
+    alert("Fixed "+fixed+" items.");
+  });
   toolbar.appendChild(scanBtn);
   const uploadBtn = renderBtn("Upload", true, () => setState({showUpload:true}));
   toolbar.appendChild(uploadBtn);
@@ -1057,8 +1083,7 @@ function renderLibrary() {
         thumb.appendChild(txt(thumbLabels[c.icon]||"File"));
       }
       card.appendChild(thumb);
-      const cardPath = folderPath(c.folderId,state.folders);
-      if(cardPath) card.appendChild(el("div", {style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"3px"}}, cardPath));
+      // No type/path label - just filename and badges
       card.appendChild(el("div", {style:{fontSize:"12px",fontWeight:500,lineHeight:1.3,marginBottom:"8px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}, c.label));
 
       const pills = div("", {display:"flex",flexDirection:"column",gap:"3px"});
@@ -1097,7 +1122,7 @@ function renderLibrary() {
     }
     panelBody.appendChild(thumbP);
     panelBody.appendChild(el("div", {style:{fontSize:"13px",fontWeight:500,marginBottom:"3px"}}, sel.label));
-    panelBody.appendChild(el("div", {style:{fontSize:"11px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"10px"}}, folderPath(sel.folderId,state.folders)));
+    panelBody.appendChild(el("div", {style:{fontSize:"11px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"10px"}}, folderPath(sel.folderId,state.folders)+(sel.sfwNsfw?" - "+sel.sfwNsfw:"")));
 
     if (sel.driveUrl) {
       const driveLink = el("a", {style:{fontSize:"11px",color:"#3b82f6",display:"block",marginBottom:"10px",wordBreak:"break-all"}}, "View in Drive");
@@ -2078,8 +2103,21 @@ function renderApp() {
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
+// Restore token from localStorage if still valid
+(function restoreToken() {
+  const token  = localStorage.getItem("cs_token");
+  const expiry = localStorage.getItem("cs_token_expiry");
+  if (token && expiry && new Date() < new Date(expiry)) {
+    state.token      = token;
+    state.tokenExpiry= expiry;
+  }
+})();
 checkAuthCallback();
 render();
+// Auto-load if already authenticated
+if (isAuthenticated()) {
+  setTimeout(() => loadFromSheets(), 500);
+}
 </script>
 </body>
 </html>
