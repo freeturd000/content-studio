@@ -270,7 +270,11 @@ async function ensureSheet(name) {
 // ── LOAD FROM SHEETS ──────────────────────────────────────────────────────────
 async function loadFromSheets() {
   if (!isAuthenticated()) return;
-  setState({syncing: true, syncError: null});
+  // Save picker state before load - never let Sheets overwrite it
+  const _ps = state.draftPickerSearch;
+  const _pf = state.draftPickerFolder;
+  const _pw = state.draftPickerSfw;
+  state.syncing = true; state.syncError = null; render();
   try {
     await Promise.all([
       ensureSheet("Models"), ensureSheet("Accounts"), ensureSheet("Platforms"),
@@ -313,13 +317,18 @@ async function loadFromSheets() {
       caption:r[7]||"", hashtags:r[8]||"", scheduledAt:r[9]||"", status:r[10]||"draft", postOrder:parseInt(r[11])||1,
     }));
 
-    setState({models, platforms, postTypes, accounts, folders, content, drafts, syncing:false, lastSynced: new Date().toLocaleTimeString(),
-      draftPickerSearch: state.draftPickerSearch||"",
-      draftPickerFolder: state.draftPickerFolder||"all",
-      draftPickerSfw: state.draftPickerSfw||"All"
-    });
+    state.models=models; state.platforms=platforms; state.postTypes=postTypes;
+    state.accounts=accounts; state.folders=folders; state.content=content; state.drafts=drafts;
+    state.syncing=false; state.lastSynced=new Date().toLocaleTimeString();
+    // Always restore picker state - never overwrite from Sheets
+    state.draftPickerSearch = _ps;
+    state.draftPickerFolder = _pf;
+    state.draftPickerSfw    = _pw;
+    render();
   } catch(e) {
-    setState({syncing:false, syncError: e.message});
+    state.syncing=false; state.syncError=e.message;
+    state.draftPickerSearch=_ps; state.draftPickerFolder=_pf; state.draftPickerSfw=_pw;
+    render();
   }
 }
 
