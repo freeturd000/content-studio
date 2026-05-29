@@ -313,7 +313,11 @@ async function loadFromSheets() {
       caption:r[7]||"", hashtags:r[8]||"", scheduledAt:r[9]||"", status:r[10]||"draft", postOrder:parseInt(r[11])||1,
     }));
 
-    setState({models, platforms, postTypes, accounts, folders, content, drafts, syncing:false, lastSynced: new Date().toLocaleTimeString()});
+    setState({models, platforms, postTypes, accounts, folders, content, drafts, syncing:false, lastSynced: new Date().toLocaleTimeString(),
+      draftPickerSearch: state.draftPickerSearch||"",
+      draftPickerFolder: state.draftPickerFolder||"all",
+      draftPickerSfw: state.draftPickerSfw||"All"
+    });
   } catch(e) {
     setState({syncing:false, syncError: e.message});
   }
@@ -1426,7 +1430,7 @@ function renderDraft() {
   const folderSel = el("select",{class:"sel",style:{width:"auto",fontSize:"11px",padding:"5px 8px"}});
   const allOpt = el("option",{value:"all"},"All Folders");
   folderSel.appendChild(allOpt);
-  state.folders.filter(f=>f.id!=="sfw"&&f.id!=="nsfw").forEach(folder=>{
+  [...state.folders].filter(f=>f.id!=="sfw"&&f.id!=="nsfw").sort((a,b)=>folderPath(a.id,state.folders).localeCompare(folderPath(b.id,state.folders))).forEach(folder=>{
     const opt = el("option",{value:folder.id},folderPath(folder.id,state.folders));
     if (folder.id===pickerFolder) opt.selected=true;
     folderSel.appendChild(opt);
