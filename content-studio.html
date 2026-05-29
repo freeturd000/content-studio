@@ -165,7 +165,14 @@ function autoName(platform, accountId, type, date, order) {
 }
 
 function setState(updates) {
+  // Preserve picker state across renders
+  const pickerSearch = state.draftPickerSearch;
+  const pickerFolder = state.draftPickerFolder;
+  const pickerSfw    = state.draftPickerSfw;
   Object.assign(state, updates);
+  if (!("draftPickerSearch" in updates)) state.draftPickerSearch = pickerSearch;
+  if (!("draftPickerFolder" in updates)) state.draftPickerFolder = pickerFolder;
+  if (!("draftPickerSfw"    in updates)) state.draftPickerSfw    = pickerSfw;
   render();
 }
 
