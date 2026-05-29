@@ -1026,6 +1026,7 @@ function renderLibrary() {
     alert("Fixed "+fixed+" items.");
   });
   toolbar.appendChild(scanBtn);
+  toolbar.appendChild(reassignBtn);
   const uploadBtn = renderBtn("Upload", true, () => setState({showUpload:true}));
   toolbar.appendChild(uploadBtn);
   main.appendChild(toolbar);
@@ -1090,9 +1091,9 @@ function renderLibrary() {
       thumb.style.background = thumbColors[c.icon]||"#f3f4f6";
       if (c.thumbnailUrl) {
         const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover",position:"absolute",top:0,left:0}});
-        const thumbSrc = c.thumbnailUrl ? c.thumbnailUrl.replace(/=s[0-9]+$/,"=s400") : "";
+        // Use Drive file ID to construct thumbnail URL that works when logged into Google
+        const thumbSrc = c.driveId ? "https://drive.google.com/thumbnail?id="+c.driveId+"&sz=w400" : (c.thumbnailUrl||"");
         img.src = thumbSrc;
-        img.crossOrigin = "anonymous";
         img.onerror = ()=>{ img.style.display="none"; thumb.appendChild(document.createTextNode("Photo")); };
         thumb.appendChild(img);
       } else {
@@ -1131,7 +1132,7 @@ function renderLibrary() {
     const thumbP = div("", {width:"100%",aspectRatio:"9/12",borderRadius:"10px",background:"#f8f8f7",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px",color:"#9ca3af",marginBottom:"12px",overflow:"hidden",position:"relative"});
     if (sel.thumbnailUrl) {
       const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover",position:"absolute",top:0,left:0}});
-      img.src = sel.thumbnailUrl ? sel.thumbnailUrl.replace(/=s[0-9]+$/,"=s400") : sel.thumbnailUrl;
+      img.src = sel.driveId ? "https://drive.google.com/thumbnail?id="+sel.driveId+"&sz=w400" : (sel.thumbnailUrl||"");
       img.onerror = ()=>{ img.style.display="none"; thumbP.appendChild(document.createTextNode("Photo")); };
       thumbP.appendChild(img);
     } else {
