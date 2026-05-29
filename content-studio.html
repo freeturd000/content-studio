@@ -1439,7 +1439,20 @@ function renderDraft() {
   const folderSel = el("select",{class:"sel",style:{width:"auto",fontSize:"11px",padding:"5px 8px"}});
   const allOpt = el("option",{value:"all"},"All Folders");
   folderSel.appendChild(allOpt);
-  [...state.folders].filter(f=>f.id!=="sfw"&&f.id!=="nsfw").sort((a,b)=>folderPath(a.id,state.folders).localeCompare(folderPath(b.id,state.folders))).forEach(folder=>{
+  const sfwFilterId = pickerSfw==="SFW"?"sfw":pickerSfw==="NSFW"?"nsfw":null;
+  const folderOptionsFiltered = [...state.folders].filter(f=>{
+    if (f.id==="sfw"||f.id==="nsfw") return false;
+    if (!sfwFilterId) return true;
+    // Check if folder is under the selected SFW/NSFW section
+    let cur = f;
+    while (cur) {
+      if (cur.parentId===sfwFilterId) return true;
+      if (cur.id===sfwFilterId) return true;
+      cur = state.folders.find(x=>x.id===cur.parentId);
+    }
+    return false;
+  }).sort((a,b)=>folderPath(a.id,state.folders).localeCompare(folderPath(b.id,state.folders)));
+  folderOptionsFiltered.forEach(folder=>{
     const opt = el("option",{value:folder.id},folderPath(folder.id,state.folders));
     if (folder.id===pickerFolder) opt.selected=true;
     folderSel.appendChild(opt);
