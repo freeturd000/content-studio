@@ -218,6 +218,8 @@ function setState(updates) {
   if (!("draftPickerSearch" in updates)) state.draftPickerSearch = pickerSearch;
   if (!("draftPickerFolder" in updates)) state.draftPickerFolder = pickerFolder;
   if (!("draftPickerSfw"    in updates)) state.draftPickerSfw    = pickerSfw;
+  // Persist active tab
+  if ("tab" in updates) localStorage.setItem("cs_active_tab", updates.tab);
   render();
 }
 
@@ -239,7 +241,7 @@ function connectGoogle() {
   const authUrl = "https://accounts.google.com/o/oauth2/v2/auth?" + params.toString();
 
   // Store state so we can restore after redirect
-  sessionStorage.setItem("cs_pre_auth_tab", state.tab);
+  localStorage.setItem("cs_pre_auth_tab", state.tab);
 
   // Redirect in same window (more reliable than popup for GitHub Pages)
   window.location.href = authUrl;
@@ -258,9 +260,9 @@ function checkAuthCallback() {
     state.token = token;
     state.tokenExpiry = expiry;
     state.syncError = null;
-    const savedTab = sessionStorage.getItem("cs_pre_auth_tab") || "library";
+    const savedTab = localStorage.getItem("cs_pre_auth_tab") || "library";
     state.tab = savedTab;
-    sessionStorage.removeItem("cs_pre_auth_tab");
+    localStorage.removeItem("cs_pre_auth_tab");
     render();
     loadFromSheets();
   }
@@ -2723,7 +2725,7 @@ window.addEventListener("beforeinstallprompt", e => {
 });
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
-// Restore token from localStorage if still valid
+// Restore token and tab from localStorage
 (function restoreToken() {
   const token  = localStorage.getItem("cs_token");
   const expiry = localStorage.getItem("cs_token_expiry");
@@ -2731,6 +2733,8 @@ window.addEventListener("beforeinstallprompt", e => {
     state.token      = token;
     state.tokenExpiry= expiry;
   }
+  const savedTab = localStorage.getItem("cs_active_tab");
+  if (savedTab) state.tab = savedTab;
 })();
 checkAuthCallback();
 render();
