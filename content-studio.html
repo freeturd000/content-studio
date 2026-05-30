@@ -201,11 +201,12 @@ function folderPath(folderId, folders) {
 }
 
 function autoName(platform, accountId, type, date, order) {
-  const code = platform === "Instagram" ? "IG" : "TT";
   const acc = state.accounts.find(a=>a.id===accountId);
-  const accCode = acc ? acc.sub.replace(/\s+/g,"") : accountId;
+  // "IG Main" -> "IG-Main", "TikTok 1" -> "TikTok-1"
+  const accLabel = acc ? acc.sub.replace(/\s+/g,"-") : "Unknown";
+  const platCode = platform === "Instagram" ? "IG" : "TT";
   const d = date ? date.slice(0,10).replace(/-/g,"") : "00000000";
-  return code+"-"+accCode+"-"+type+"-"+String(order).padStart(3,"0")+"-"+d;
+  return platCode+"_"+accLabel+"_"+type+"_"+String(order).padStart(3,"0")+"_"+d;
 }
 
 function setState(updates) {
@@ -889,6 +890,7 @@ function renderSidebar() {
     {id:"library", label:"Content Library"},
     {id:"draft",   label:"Draft Post"},
     {id:"calendar",label:"Calendar"},
+    {id:"metrics", label:"Metrics"},
   ].forEach(t => {
     const btn = el("button", {class:"nav-btn"+(state.tab===t.id?" active":"")}, t.label);
     btn.addEventListener("click", () => setState({tab:t.id}));
@@ -2334,13 +2336,12 @@ function renderMobileApp() {
 
   // Content area
   const content = el("div",{style:{flex:1,overflowY:"auto",paddingBottom:"70px"}});
-  if (state.mobileTab==="calendar") content.appendChild(renderMobileCalendar());
-  else content.appendChild(renderMobileMetrics());
+  content.appendChild(renderMobileCalendar());
   wrap.appendChild(content);
 
   // Bottom nav
   const nav = el("div",{style:{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid #f0f0f0",display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom, 0px)"}});
-  [{id:"calendar",label:"Calendar",icon:"📅"},{id:"metrics",label:"Metrics",icon:"📊"}].forEach(t=>{
+  [{id:"calendar",label:"Calendar",icon:"📅"}].forEach(t=>{
     const active = state.mobileTab===t.id;
     const btn = el("button",{style:{flex:1,padding:"10px 4px 8px",border:"none",background:"transparent",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:"2px",color:active?"#1c1c1e":"#9ca3af"}});
     btn.appendChild(el("span",{style:{fontSize:"20px"}},t.icon));
@@ -2668,7 +2669,7 @@ function renderApp() {
   if (state.tab==="library")  content.appendChild(renderLibrary());
   if (state.tab==="draft")    content.appendChild(renderDraft());
   if (state.tab==="calendar") content.appendChild(renderCalendar());
-  // Metrics removed from web - available on mobile only
+  if (state.tab==="metrics")  content.appendChild(renderMetrics());
   main.appendChild(content);
   app.appendChild(main);
 
