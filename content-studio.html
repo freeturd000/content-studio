@@ -478,7 +478,7 @@ async function saveToSheets() {
     await sheetsClear("Folders!A2:D");
     if (state.folders.length) await sheetsSet("Folders!A2", state.folders.map(f=>[f.id,f.name,f.parentId||"",f.sfwNsfw||"",f.driveId||"",f.locked?'true':'']));
 
-    await sheetsClear("Content!A2:I");
+    await sheetsClear("Content!A2:K");
     if (state.content.length) await sheetsSet("Content!A2", state.content.map(c=>[c.id,c.folderId,c.type,c.label,c.uploaded,c.icon,c.modelId,c.driveId||"",c.driveUrl||"",c.sfwNsfw||"",c.thumbnailUrl||""]));
 
     await sheetsClear("Posts!A2:H");
@@ -519,16 +519,42 @@ async function driveCreateFolder(name, parentId) {
 }
 
 async function driveUploadFile(file, name, parentId) {
-  const meta = JSON.stringify({name, parents:[parentId]});
-  const form = new FormData();
-  form.append("metadata", new Blob([meta], {type:"application/json"}));
-  form.append("file", file);
-  const r = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink", {
-    method: "POST",
-    headers: {Authorization: "Bearer " + state.token},
-    body: form
-  });
-  return await r.json();
+  const meta = {name, parents:[parentId]};
+  // Use resumable upload for files >10MB (videos etc), multipart for smaller files
+  if (file.size > 10 * 1024 * 1024) {
+    // Step 1: initiate resumable session
+    const initR = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,webViewLink", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + state.token,
+        "Content-Type": "application/json",
+        "X-Upload-Content-Type": file.type || "application/octet-stream",
+        "X-Upload-Content-Length": file.size,
+      },
+      body: JSON.stringify(meta)
+    });
+    const uploadUrl = initR.headers.get("Location");
+    // Step 2: upload file in one PUT (chunk if needed for very large files)
+    const upR = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+        "Content-Length": file.size,
+      },
+      body: file
+    });
+    return await upR.json();
+  } else {
+    const form = new FormData();
+    form.append("metadata", new Blob([JSON.stringify(meta)], {type:"application/json"}));
+    form.append("file", file);
+    const r = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink", {
+      method: "POST",
+      headers: {Authorization: "Bearer " + state.token},
+      body: form
+    });
+    return await r.json();
+  }
 }
 
 async function driveCountFilesInFolder(folderId) {
@@ -1483,7 +1509,7 @@ function renderUploadModal() {
   // File picker
   const fileRow = div("",{marginBottom:"16px"});
   fileRow.appendChild(el("span",{class:"lbl"},"FILE"));
-  const fileInp = el("input",{type:"file",class:"inp",style:{padding:"5px"}});
+  const fileInp = el("input",{type:"file",class:"inp",style:{padding:"5px"},accept:"image/*,video/*"});
   fileInp.addEventListener("change", e=>{ selectedFile=e.target.files[0]; });
   fileRow.appendChild(fileInp);
   modal.appendChild(fileRow);
@@ -1555,7 +1581,8 @@ function renderUploadModal() {
       const categoryName = ancestry.length > 1 ? ancestry[0].name : (folderObj?.name||"content");
       const subfolderName = ancestry.length > 1 ? ancestry[ancestry.length-1].name : (folderObj?.name||"content");
 
-      statusEl.textContent="Uploading file...";
+      const sizeMB = (selectedFile.size / 1024 / 1024).toFixed(1);
+      statusEl.textContent="Uploading file ("+sizeMB+"MB)...";
       const result = await uploadFile(selectedFile, currentDriveFolderId, modelName, categoryName, subfolderName, selectedSFW);
 
       if (result) {
