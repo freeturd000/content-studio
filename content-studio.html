@@ -72,6 +72,23 @@ input,select,textarea{font-family:system-ui;font-size:12px;color:#1a1a1a;}
   .mobile-nav{display:none!important;}
   .mobile-only{display:none!important;}
 }
+
+/* Dark mode */
+.dark body{background:#111112;}
+.dark .app{background:#111112;}
+.dark .main{background:#111112;}
+.dark .topbar{background:#1c1c1e;border-color:#3a3a3c;color:#e5e5e5;}
+.dark .card{background:#2c2c2e;border-color:#3a3a3c;color:#e5e5e5;}
+.dark .content-area{background:#111112;}
+.dark .inp{background:#3a3a3c;border-color:#48484a;color:#e5e5e5;}
+.dark .sel{background:#3a3a3c;border-color:#48484a;color:#e5e5e5;}
+.dark .overlay .modal{background:#2c2c2e;color:#e5e5e5;}
+.dark .btn-secondary{border-color:#48484a;color:#aeaeb2;background:transparent;}
+.dark .btn-secondary:hover{background:#3a3a3c;}
+.dark .lbl{color:#636366;}
+.dark .section-title{color:#636366;}
+.dark .empty-state{color:#636366;}
+.dark input,.dark select,.dark textarea{color:#e5e5e5;}
 </style>
 </head>
 <body>
@@ -88,7 +105,9 @@ const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googlea
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let state = {
   tab: "library",
+  mobileTab: "calendar",
   model: "all",
+  darkMode: localStorage.getItem("cs_dark_mode")==="true",
   sidebarOpen: false,
   mobileTab: "calendar",
   mobileDay: new Date().toISOString().slice(0,10),
@@ -224,6 +243,9 @@ function setState(updates) {
   if (!("draftPickerSearch" in updates)) state.draftPickerSearch = pickerSearch;
   if (!("draftPickerFolder" in updates)) state.draftPickerFolder = pickerFolder;
   if (!("draftPickerSfw"    in updates)) state.draftPickerSfw    = pickerSfw;
+  // Sync tab and mobileTab
+  if ("tab" in updates && !("mobileTab" in updates)) state.mobileTab = updates.tab;
+  if ("mobileTab" in updates && !("tab" in updates)) state.tab = updates.mobileTab;
   // Persist active tab
   if ("tab" in updates) localStorage.setItem("cs_active_tab", updates.tab);
   render();
@@ -337,8 +359,8 @@ async function loadFromSheets() {
 
     const [modelsData, accountsData, platformsData, postTypesData, foldersData, contentData, draftsData, postsData] = await Promise.all([
       sheetsGet("Models!A2:C"), sheetsGet("Accounts!A2:J"), sheetsGet("Platforms!A2:C"),
-      sheetsGet("PostTypes!A2:B"), sheetsGet("Folders!A2:D"), sheetsGet("Content!A2:I"),
-      sheetsGet("Drafts!A2:L"), sheetsGet("Posts!A2:H"),
+      sheetsGet("PostTypes!A2:B"), sheetsGet("Folders!A2:D"), sheetsGet("Content!A2:K"),
+      sheetsGet("Drafts!A2:O"), sheetsGet("Posts!A2:H"),
     ]);
 
     const models = modelsData.length ? modelsData.map(r => ({id:r[0],label:r[1]})) : state.models;
@@ -378,8 +400,15 @@ async function loadFromSheets() {
     state.draftPickerSearch = _ps;
     state.draftPickerFolder = _pf;
     state.draftPickerSfw    = _pw;
-    // Trigger post name update now that accounts are loaded
-    if (!state.draftNameOverridden && state.tab==="draft") updateDraftName();
+    // Fix draftForm.accountId if it doesn't match any loaded account
+    if (!state.draftNameOverridden) {
+      const validAcc = accounts.find(a=>a.id===state.draftForm.accountId);
+      if (!validAcc) {
+        const platAccs = accounts.filter(a=>a.platform===state.draftForm.platform&&a.status==="active");
+        if (platAccs.length) state.draftForm.accountId = platAccs[0].id;
+      }
+      updateDraftName();
+    }
     render();
   } catch(e) {
     state.syncing=false; state.syncError=e.message;
@@ -938,6 +967,10 @@ function renderSidebar() {
   settingsBtn.innerHTML = "&#9881; Settings";
   settingsBtn.addEventListener("click", () => setState({showSettings:true}));
   settingsWrap.appendChild(settingsBtn);
+  const darkBtn = el("button", {style:{display:"flex",alignItems:"center",gap:"8px",width:"100%",padding:"8px 12px",border:"none",borderRadius:"8px",background:state.darkMode?"rgba(255,255,255,0.1)":"transparent",color:"#9ca3af",fontSize:"12px",cursor:"pointer",textAlign:"left"}});
+  darkBtn.innerHTML = (state.darkMode?"&#9728;":"&#9790;") + " " + (state.darkMode?"Light Mode":"Dark Mode");
+  darkBtn.addEventListener("click", () => { const d=!state.darkMode; localStorage.setItem("cs_dark_mode",String(d)); setState({darkMode:d}); });
+  settingsWrap.appendChild(darkBtn);
   side.appendChild(settingsWrap);
 
   return side;
@@ -1209,11 +1242,10 @@ function renderLibrary() {
 
     const panelBody = div("", {padding:"14px"});
     const thumbP = div("", {width:"100%",aspectRatio:"9/12",borderRadius:"10px",background:"#f8f8f7",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px",color:"#9ca3af",marginBottom:"12px",overflow:"hidden",position:"relative"});
-    if (sel.thumbnailUrl) {
+    if (sel.driveId) {
       const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover",position:"absolute",top:0,left:0}});
-      img.onerror = ()=>{ img.style.display="none"; };
-      setThumbSrc(img, sel.driveId);
       img.onerror = ()=>{ img.style.display="none"; thumbP.appendChild(document.createTextNode("Photo")); };
+      setThumbSrc(img, sel.driveId);
       thumbP.appendChild(img);
     } else {
       thumbP.appendChild(txt("Image"));
@@ -1372,8 +1404,13 @@ function renderUploadModal() {
       // Navigate Drive folder hierarchy starting from readyFolderId
       let currentDriveFolderId = readyFolderId;
       for (const appFolder of ancestry) {
+        // Use stored driveId if available (set from Drive scan) — most reliable
+        if (appFolder.driveId) {
+          currentDriveFolderId = appFolder.driveId;
+          continue;
+        }
         const children = await driveListFolder(currentDriveFolderId);
-        // Match by name (Drive folders may have number prefixes like "01 - Selfie")
+        // Match by name — strip number prefixes from Drive folder names (e.g. "01 - Selfie" → "selfie")
         let match = children.find(f =>
           f.mimeType === "application/vnd.google-apps.folder" &&
           f.name.toLowerCase().replace(/^\d+\s*-\s*/,"") === appFolder.name.toLowerCase()
@@ -1499,10 +1536,9 @@ function renderDraft() {
 
   // Content selection
   const contentCard = div("card",{marginBottom:"12px"});
-  contentCard.appendChild(el("span",{class:"lbl"},"SELECT CONTENT - not used on "+f.platform));
+  contentCard.appendChild(el("span",{class:"lbl"},"SELECT CONTENT"));
 
   const modelContent = state.model==="all"?state.content:state.content.filter(c=>c.modelId===state.model);
-  const available = modelContent.filter(c=>!(c.posts||[]).some(p=>state.accounts.find(a=>a.id===p.accountId)?.platform===f.platform));
 
   // Search and filter controls
   const pickerSearch = state.draftPickerSearch||"";
@@ -1574,36 +1610,53 @@ function renderDraft() {
 
   contentCard.appendChild(pickerControls);
 
-  // Filter available content
+  // Filter content
   const getFolderIdsP = fid => { if(fid==="all") return null; const kids=state.folders.filter(x=>x.parentId===fid).map(x=>x.id); return [fid,...kids]; };
   const pickerFolderIds = getFolderIdsP(pickerFolder);
-  const filteredAvailable = available.filter(c=>{
+  const filteredContent = modelContent.filter(c=>{
     const searchOk = !pickerSearch || c.label.toLowerCase().includes(pickerSearch.toLowerCase());
-    const sfwOk    = pickerSfw==="All" || c.sfwNsfw===pickerSfw || (!c.sfwNsfw&&pickerSfw==="All");
+    const sfwOk    = pickerSfw==="All" || c.sfwNsfw===pickerSfw;
     const folderOk = !pickerFolderIds || pickerFolderIds.includes(c.folderId);
     return searchOk&&sfwOk&&folderOk;
   });
 
-  if (!available.length) {
-    contentCard.appendChild(renderEmptyState("No available content","All content used on "+f.platform+".","",null));
-  } else if (!filteredAvailable.length) {
+  if (!modelContent.length) {
+    contentCard.appendChild(renderEmptyState("No content","Upload content first.","",null));
+  } else if (!filteredContent.length) {
     contentCard.appendChild(el("div",{style:{fontSize:"12px",color:"#9ca3af",padding:"12px 0",textAlign:"center"}},"No content matches your filters."));
   } else {
     // Scrollable list
     const pickerList = div("",{maxHeight:"320px",overflowY:"auto",display:"flex",flexDirection:"column",gap:"5px"});
-    filteredAvailable.forEach(c => {
+    filteredContent.forEach(c => {
       const isPicked = f.contentIds.includes(c.id);
-      const row = div("",{display:"flex",alignItems:"center",gap:"8px",padding:"8px 10px",borderRadius:"8px",border:isPicked?"1.5px solid #1c1c1e":"1px solid #e5e7eb",background:isPicked?"#f9f9f9":"#fff",cursor:"pointer",flexShrink:0});
+      // Check if already posted on this platform
+      const postedOnPlatform = (c.posts||[]).filter(p=>state.accounts.find(a=>a.id===p.accountId)?.platform===f.platform);
+      const isAlreadyPosted = postedOnPlatform.length > 0;
+      const borderColor = isPicked ? "#1c1c1e" : isAlreadyPosted ? "#f59e0b" : "#e5e7eb";
+      const bgColor = isPicked ? "#f9f9f9" : isAlreadyPosted ? "#fffbeb" : "#fff";
+      const row = div("",{display:"flex",alignItems:"center",gap:"8px",padding:"8px 10px",borderRadius:"8px",border:"1.5px solid "+borderColor,background:bgColor,cursor:"pointer",flexShrink:0});
       row.addEventListener("click", () => {
-        state.draftForm.contentIds = isPicked ? f.contentIds.filter(x=>x!==c.id) : [...f.contentIds,c.id];
-        render();
+        if (isPicked) {
+          state.draftForm.contentIds = f.contentIds.filter(x=>x!==c.id);
+          render();
+        } else if (isAlreadyPosted) {
+          const postNames = postedOnPlatform.map(p=>'"'+(p.postName||p.date)+'"').join(", ");
+          const dates = postedOnPlatform.map(p=>p.date).join(", ");
+          if (confirm("This content was already posted as "+postNames+" on "+dates+". Use it again?")) {
+            state.draftForm.contentIds = [...f.contentIds, c.id];
+            render();
+          }
+        } else {
+          state.draftForm.contentIds = [...f.contentIds, c.id];
+          render();
+        }
       });
       // Thumbnail
       const thumb = div("",{width:"36px",height:"36px",borderRadius:"6px",background:"#f3f4f6",flexShrink:0,overflow:"hidden",position:"relative",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"10px",color:"#9ca3af"});
       if (c.driveId) {
         const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover"}});
-        img.src = "https://drive.google.com/thumbnail?id="+c.driveId+"&sz=w80";
         img.onerror = ()=>{ img.style.display="none"; };
+        setThumbSrc(img, c.driveId);
         thumb.appendChild(img);
       } else {
         thumb.appendChild(txt("img"));
@@ -1613,11 +1666,15 @@ function renderDraft() {
       info.appendChild(el("div",{style:{fontSize:"12px",fontWeight:500,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}},c.label));
       const pathLabel = folderPath(c.folderId,state.folders);
       if (pathLabel) info.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace"}},pathLabel));
+      if (isAlreadyPosted) {
+        const warnLabel = postedOnPlatform.map(p=>p.postName||p.date).join(", ");
+        info.appendChild(el("div",{style:{fontSize:"10px",color:"#b45309",fontFamily:"monospace",marginTop:"1px"}},"⚠ "+warnLabel));
+      }
       row.appendChild(info);
-      if (isPicked) row.appendChild(el("span",{style:{fontSize:"14px",color:"#1c1c1e",flexShrink:0}},"OK"));
+      if (isPicked) row.appendChild(el("span",{style:{fontSize:"14px",color:"#1c1c1e",flexShrink:0}},"✓"));
       pickerList.appendChild(row);
     });
-    contentCard.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",marginBottom:"6px",fontFamily:"monospace"}},filteredAvailable.length+" of "+available.length+" shown - "+f.contentIds.length+" selected"));
+    contentCard.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",marginBottom:"6px",fontFamily:"monospace"}},filteredContent.length+" shown - "+f.contentIds.length+" selected"));
     contentCard.appendChild(pickerList);
   }
   formArea.appendChild(contentCard);
@@ -1689,7 +1746,7 @@ function renderDraft() {
       metrics: state.editingDraft?.metrics||{views:0,likes:0,comments:0}
     };
     const newDrafts = isEdit ? state.drafts.map(d=>d.id===draft.id?draft:d) : [...state.drafts,draft];
-    // If saving as posted, update content.posts
+    // Update content.posts based on posted status
     let newContent = state.content;
     if (f.status==="posted") {
       newContent = state.content.map(c=>{
@@ -1697,6 +1754,12 @@ function renderDraft() {
         const alreadyPosted = (c.posts||[]).some(p=>p.accountId===draft.accountId&&p.date===draft.scheduledAt?.slice(0,10));
         if (alreadyPosted) return c;
         return {...c, posts:[...(c.posts||[]),{accountId:draft.accountId,date:draft.scheduledAt?.slice(0,10)||"",postName:draft.name||"",views:0,likes:0,comments:0}]};
+      });
+    } else if (isEdit && state.editingDraft?.status==="posted") {
+      // Was posted, now being changed — remove from content.posts
+      newContent = state.content.map(c=>{
+        if (!draft.contentIds.includes(c.id)) return c;
+        return {...c, posts:(c.posts||[]).filter(p=>p.accountId!==draft.accountId||p.date!==state.editingDraft.scheduledAt?.slice(0,10))};
       });
     }
     setState({drafts:newDrafts, content:newContent, editingDraft:null, draftForm:{platform:"Instagram",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"}, draftNameOverridden:false});
@@ -1892,7 +1955,21 @@ function renderCalendar() {
       const isActive = st===s;
       const sBtn = el("button",{style:{padding:"5px 14px",borderRadius:"20px",border:"1.5px solid",borderColor:isActive?SC[s]:"#e5e7eb",background:isActive?SBG[s]:"transparent",color:isActive?STX[s]:"#9ca3af",fontSize:"11px",fontWeight:isActive?"600":"400",cursor:"pointer",fontFamily:"monospace"}},s);
       sBtn.addEventListener("click", () => {
-        setState({drafts:state.drafts.map(x=>x.id===d.id?{...x,status:s}:x), showDraftModal:{...d,status:s}});
+        let updatedContent = state.content;
+        if (s === "posted") {
+          updatedContent = state.content.map(c => {
+            if (!(d.contentIds||[]).includes(c.id)) return c;
+            const alreadyPosted = (c.posts||[]).some(p=>p.accountId===d.accountId&&p.date===d.scheduledAt?.slice(0,10));
+            if (alreadyPosted) return c;
+            return {...c, posts:[...(c.posts||[]),{accountId:d.accountId,date:d.scheduledAt?.slice(0,10)||"",postName:d.name||"",views:0,likes:0,comments:0}]};
+          });
+        } else {
+          updatedContent = state.content.map(c => {
+            if (!(d.contentIds||[]).includes(c.id)) return c;
+            return {...c, posts:(c.posts||[]).filter(p=>p.accountId!==d.accountId||p.date!==d.scheduledAt?.slice(0,10))};
+          });
+        }
+        setState({drafts:state.drafts.map(x=>x.id===d.id?{...x,status:s}:x), content:updatedContent, showDraftModal:{...d,status:s}});
         if (isAuthenticated()) saveToSheets();
       });
       statusBtns.appendChild(sBtn);
@@ -2358,26 +2435,30 @@ function renderMetricsUpdateModal() {
 
 // ── MOBILE APP ────────────────────────────────────────────────────────────────
 function renderMobileApp() {
-  const wrap = el("div",{style:{display:"flex",flexDirection:"column",height:"100vh",background:"#f8f8f7",fontFamily:"system-ui,sans-serif",fontSize:13,overflow:"hidden"}});
+  const bg = state.darkMode ? "#111112" : "#f8f8f7";
+  const cardBg = state.darkMode ? "#2c2c2e" : "#fff";
+  const wrap = el("div",{style:{display:"flex",flexDirection:"column",height:"100vh",background:bg,fontFamily:"system-ui,sans-serif",fontSize:"13px",overflow:"hidden"}});
 
   // Top bar
-  const topbar = el("div",{style:{background:"#1c1c1e",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,paddingTop:"env(safe-area-inset-top, 12px)"}});
-  const titleWrap = el("div",{style:{display:"flex",flexDirection:"column"}});
-  titleWrap.appendChild(el("span",{style:{fontSize:"14px",fontWeight:600,color:"#fff"}},"Content Studio"));
+  const topbar = el("div",{style:{background:"#1c1c1e",padding:"12px 16px",display:"flex",alignItems:"center",gap:"10px",justifyContent:"space-between",flexShrink:0,paddingTop:"env(safe-area-inset-top, 12px)"}});
+  const hamburger = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"20px",color:"#fff",padding:"4px",minWidth:"44px",minHeight:"44px",display:"flex",alignItems:"center",justifyContent:"center"}},"☰");
+  hamburger.addEventListener("click",()=>setState({sidebarOpen:!state.sidebarOpen}));
+  topbar.appendChild(hamburger);
+  const tabTitlesM = {library:"Library",draft:"Draft",calendar:"Calendar",metrics:"Metrics"};
+  const titleDiv = el("div",{style:{flex:1,display:"flex",flexDirection:"column"}});
+  titleDiv.appendChild(el("span",{style:{fontSize:"14px",fontWeight:600,color:"#fff"}},tabTitlesM[state.mobileTab]||"Content Studio"));
   if (isAuthenticated()) {
     const expiryMins = state.tokenExpiry ? Math.max(0,Math.round((new Date(state.tokenExpiry)-new Date())/60000)) : 0;
-    titleWrap.appendChild(el("span",{style:{fontSize:"9px",color:"#22c55e",fontFamily:"monospace"}},expiryMins+"m"));
+    titleDiv.appendChild(el("span",{style:{fontSize:"9px",color:"#22c55e",fontFamily:"monospace"}},expiryMins+"m"));
   }
-  topbar.appendChild(titleWrap);
-
+  topbar.appendChild(titleDiv);
   const rightWrap = el("div",{style:{display:"flex",alignItems:"center",gap:"8px"}});
-
   if (!isAuthenticated()) {
-    const connectBtn = el("button",{style:{background:"#fff",color:"#1c1c1e",border:"none",borderRadius:"8px",padding:"7px 12px",fontSize:"12px",fontWeight:600,cursor:"pointer"}},"Connect");
+    const connectBtn = el("button",{style:{background:"#fff",color:"#1c1c1e",border:"none",borderRadius:"8px",padding:"7px 12px",fontSize:"12px",fontWeight:600,cursor:"pointer",minHeight:"44px"}},"Connect");
     connectBtn.addEventListener("click",connectGoogle);
     rightWrap.appendChild(connectBtn);
   } else {
-    const modelSel = el("select",{style:{background:"#2c2c2e",color:"#fff",border:"1px solid rgba(255,255,255,0.2)",borderRadius:"8px",padding:"5px 8px",fontSize:"12px",cursor:"pointer"}});
+    const modelSel = el("select",{style:{background:"#2c2c2e",color:"#fff",border:"1px solid rgba(255,255,255,0.2)",borderRadius:"8px",padding:"5px 8px",fontSize:"12px",cursor:"pointer",minHeight:"44px"}});
     state.models.forEach(m=>{
       const opt = el("option",{value:m.id},m.label);
       if (m.id===state.model) opt.selected=true;
@@ -2389,17 +2470,36 @@ function renderMobileApp() {
   topbar.appendChild(rightWrap);
   wrap.appendChild(topbar);
 
+  // Collapsible sidebar overlay
+  if (state.sidebarOpen) {
+    const sideOverlay = el("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:300}});
+    sideOverlay.addEventListener("click",()=>setState({sidebarOpen:false}));
+    const sidePanel = el("div",{style:{position:"fixed",top:0,left:0,bottom:0,width:"260px",background:"#1c1c1e",zIndex:301,overflowY:"auto",boxShadow:"4px 0 20px rgba(0,0,0,0.3)"}});
+    // Render the full sidebar content inside
+    const innerSidebar = renderSidebar();
+    // Reuse sidebar content: copy all children
+    while (innerSidebar.firstChild) sidePanel.appendChild(innerSidebar.firstChild);
+    sideOverlay.appendChild(sidePanel);
+    wrap.appendChild(sideOverlay);
+  }
+
   // Content area
   const content = el("div",{style:{flex:1,overflowY:"auto",paddingBottom:"70px"}});
-  content.appendChild(renderMobileCalendar());
+  if (state.mobileTab==="library")  content.appendChild(renderMobileLibrary());
+  else if (state.mobileTab==="draft") content.appendChild(renderMobileDraftForm());
+  else if (state.mobileTab==="calendar") content.appendChild(renderMobileCalendar());
+  else if (state.mobileTab==="metrics") content.appendChild(renderMobileMetrics());
   wrap.appendChild(content);
 
   // Bottom nav
-  const nav = el("div",{style:{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid #f0f0f0",display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom, 0px)"}});
-  [{id:"calendar",label:"Calendar",icon:"📅"}].forEach(t=>{
+  const navBg = state.darkMode ? "#1c1c1e" : "#fff";
+  const navBorder = state.darkMode ? "#3a3a3c" : "#f0f0f0";
+  const nav = el("div",{style:{position:"fixed",bottom:0,left:0,right:0,background:navBg,borderTop:"1px solid "+navBorder,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom, 0px)"}});
+  [{id:"library",label:"Library",icon:"⊞"},{id:"draft",label:"Draft",icon:"+"},{id:"calendar",label:"Calendar",icon:"◫"},{id:"metrics",label:"Metrics",icon:"↗"}].forEach(t=>{
     const active = state.mobileTab===t.id;
-    const btn = el("button",{style:{flex:1,padding:"10px 4px 8px",border:"none",background:"transparent",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:"2px",color:active?"#1c1c1e":"#9ca3af"}});
-    btn.appendChild(el("span",{style:{fontSize:"20px"}},t.icon));
+    const textColor = active ? (state.darkMode?"#fff":"#1c1c1e") : "#9ca3af";
+    const btn = el("button",{style:{flex:1,padding:"10px 4px 8px",border:"none",background:"transparent",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:"2px",color:textColor,minHeight:"50px"}});
+    btn.appendChild(el("span",{style:{fontSize:"20px",lineHeight:1}},t.icon));
     btn.appendChild(el("span",{style:{fontSize:"10px",fontWeight:active?"600":"400"}},t.label));
     btn.addEventListener("click",()=>setState({mobileTab:t.id}));
     nav.appendChild(btn);
@@ -2409,8 +2509,440 @@ function renderMobileApp() {
   // Modals
   if (state.showDraftModal) wrap.appendChild(renderMobileDraftModal());
   if (state.showMetricsUpdate) wrap.appendChild(renderMetricsUpdateModal());
+  if (state.showUpload) wrap.appendChild(renderUploadModal());
+  if (state.showSettings) wrap.appendChild(renderSettings());
+  if (state.showEditAccount) wrap.appendChild(renderEditAccountModal(state.showEditAccount));
+  if (state.showAddAccount) wrap.appendChild(renderAddAccountModal());
+  if (state.showConfirm) wrap.appendChild(renderConfirm(state.showConfirm.message, state.showConfirm.onYes, ()=>setState({showConfirm:null})));
 
   return wrap;
+}
+
+function renderMobileLibrary() {
+  const bg = state.darkMode ? "#111112" : "#f8f8f7";
+  const cardBg = state.darkMode ? "#2c2c2e" : "#fff";
+  const borderCol = state.darkMode ? "#3a3a3c" : "#f0f0f0";
+  const wrap = el("div",{style:{padding:"0"}});
+
+  // Toolbar
+  const toolbar = el("div",{style:{padding:"10px 16px",background:cardBg,borderBottom:"1px solid "+borderCol,display:"flex",flexDirection:"column",gap:"8px",position:"sticky",top:0,zIndex:10}});
+
+  // Search
+  const searchInp = el("input",{style:{width:"100%",padding:"8px 12px",border:"1px solid "+borderCol,borderRadius:"8px",background:bg,color:state.darkMode?"#e5e5e5":"#1a1a1a",fontSize:"13px",boxSizing:"border-box"},placeholder:"Search..."});
+  searchInp.value = state.librarySearch||"";
+  searchInp.addEventListener("input",e=>setState({librarySearch:e.target.value}));
+  toolbar.appendChild(searchInp);
+
+  // SFW/NSFW filter
+  const sfwRow = el("div",{style:{display:"flex",gap:"6px",overflowX:"auto"}});
+  ["All","SFW","NSFW"].forEach(opt=>{
+    const active=(state.librarySfwFilter||"All")===opt;
+    const btn = el("button",{style:{padding:"6px 16px",borderRadius:"20px",border:"1px solid",borderColor:active?"#1c1c1e":borderCol,background:active?"#1c1c1e":"transparent",color:active?"#fff":"#6b7280",fontSize:"12px",cursor:"pointer",fontFamily:"monospace",whiteSpace:"nowrap",minHeight:"36px"}},opt);
+    btn.addEventListener("click",()=>setState({librarySfwFilter:opt}));
+    sfwRow.appendChild(btn);
+  });
+  // Folder filter
+  const folderSelM = el("select",{style:{flex:1,border:"1px solid "+borderCol,borderRadius:"8px",padding:"6px 8px",fontSize:"12px",background:bg,color:state.darkMode?"#e5e5e5":"#1a1a1a",minHeight:"36px"}});
+  const allFolderOpt = el("option",{value:"all"},"All Folders");
+  if ((state.libraryFolder||"all")==="all") allFolderOpt.selected=true;
+  folderSelM.appendChild(allFolderOpt);
+  const buildFolderOpts = (parentId,depth) => {
+    state.folders.filter(f=>f.parentId===parentId&&!f.locked).forEach(f=>{
+      const opt = el("option",{value:f.id},"  ".repeat(depth)+f.name);
+      if (state.libraryFolder===f.id) opt.selected=true;
+      folderSelM.appendChild(opt);
+      buildFolderOpts(f.id,depth+1);
+    });
+  };
+  state.folders.filter(f=>f.locked).forEach(f=>buildFolderOpts(f.id,0));
+  folderSelM.addEventListener("change",e=>setState({libraryFolder:e.target.value}));
+  const filterRow = el("div",{style:{display:"flex",gap:"6px",alignItems:"center"}});
+  filterRow.appendChild(sfwRow);
+  filterRow.appendChild(folderSelM);
+  toolbar.appendChild(filterRow);
+  wrap.appendChild(toolbar);
+
+  // Filter content
+  const modelContent = state.model==="all"?state.content:state.content.filter(c=>c.modelId===state.model);
+  const getFolderIds = fid => { if(fid==="all"||!fid) return null; const kids=state.folders.filter(f=>f.parentId===fid).map(f=>f.id); return [fid,...kids]; };
+  const fids = getFolderIds(state.libraryFolder||"all");
+  const sfwF = state.librarySfwFilter||"All";
+  const filtered = modelContent.filter(c=>{
+    const fOk=!fids||fids.includes(c.folderId);
+    const sOk=!state.librarySearch||c.label.toLowerCase().includes(state.librarySearch.toLowerCase());
+    const swOk=sfwF==="All"||c.sfwNsfw===sfwF;
+    return fOk&&sOk&&swOk;
+  });
+
+  // Stats bar
+  const statsBar = el("div",{style:{display:"flex",gap:"1px",background:borderCol,borderBottom:"1px solid "+borderCol}});
+  [{l:"Total",v:modelContent.length},{l:"Unused",v:modelContent.filter(c=>!c.posts.length).length},{l:"Shown",v:filtered.length}].forEach(s=>{
+    const cell = el("div",{style:{flex:1,padding:"8px 4px",textAlign:"center",background:cardBg}});
+    cell.appendChild(el("div",{style:{fontSize:"16px",fontWeight:600,fontFamily:"monospace",color:state.darkMode?"#e5e5e5":"#1a1a1a"}},s.v));
+    cell.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af"}},s.l));
+    statsBar.appendChild(cell);
+  });
+  wrap.appendChild(statsBar);
+
+  // Content grid
+  const grid = el("div",{style:{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:"10px",padding:"12px 16px"}});
+  if (!filtered.length) {
+    const empty = el("div",{style:{gridColumn:"1/-1",textAlign:"center",padding:"40px 20px",color:"#9ca3af"}});
+    empty.appendChild(el("div",{style:{fontSize:"32px",marginBottom:"8px",opacity:0.3}},"[ ]"));
+    empty.appendChild(el("div",{style:{fontSize:"14px",fontWeight:500,color:state.darkMode?"#aeaeb2":"#374151"}},"No content"));
+    grid.appendChild(empty);
+  } else {
+    filtered.forEach(c=>{
+      const igP=(c.posts||[]).filter(p=>state.accounts.find(a=>a.id===p.accountId)?.platform==="Instagram");
+      const ttP=(c.posts||[]).filter(p=>state.accounts.find(a=>a.id===p.accountId)?.platform==="TikTok");
+      const card = el("div",{style:{background:cardBg,border:"1px solid "+borderCol,borderRadius:"10px",padding:"10px",cursor:"pointer",position:"relative"}});
+      card.addEventListener("click",()=>setState({selectedContent:state.selectedContent===c.id?null:c.id}));
+      if (c.sfwNsfw) {
+        const badge = el("span",{style:{position:"absolute",top:"6px",left:"6px",fontSize:"9px",padding:"1px 5px",borderRadius:"20px",background:c.sfwNsfw==="SFW"?"#eff6ff":"#fef2f2",color:c.sfwNsfw==="SFW"?"#1d4ed8":"#b91c1c",fontWeight:600,fontFamily:"monospace"}},c.sfwNsfw);
+        card.appendChild(badge);
+      }
+      // Thumbnail
+      const thumb = el("div",{style:{width:"100%",aspectRatio:"4/3",borderRadius:"6px",background:"#f3f4f6",marginBottom:"7px",overflow:"hidden",position:"relative"}});
+      if (c.driveId) {
+        const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover"}});
+        img.onerror=()=>{img.style.display="none";};
+        setThumbSrc(img, c.driveId);
+        thumb.appendChild(img);
+      }
+      card.appendChild(thumb);
+      card.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",color:state.darkMode?"#e5e5e5":"#1a1a1a",marginBottom:"5px"}},c.label));
+      const pills = el("div",{style:{display:"flex",flexDirection:"column",gap:"2px"}});
+      if (igP.length) igP.forEach(p=>{pills.appendChild(el("div",{style:{fontSize:"9px",color:"#be185d",background:"#fce7f3",borderRadius:"4px",padding:"1px 5px",fontFamily:"monospace",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}},p.postName||p.date));});
+      else pills.appendChild(el("div",{style:{fontSize:"9px",color:"#9ca3af",background:"#f9fafb",borderRadius:"4px",padding:"1px 5px",fontFamily:"monospace",border:"1px dashed #e5e7eb"}},"IG — not posted"));
+      if (ttP.length) ttP.forEach(p=>{pills.appendChild(el("div",{style:{fontSize:"9px",color:"#374151",background:"#f3f4f6",borderRadius:"4px",padding:"1px 5px",fontFamily:"monospace",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}},p.postName||p.date));});
+      else pills.appendChild(el("div",{style:{fontSize:"9px",color:"#9ca3af",background:"#f9fafb",borderRadius:"4px",padding:"1px 5px",fontFamily:"monospace",border:"1px dashed #e5e7eb"}},"TT — not posted"));
+      card.appendChild(pills);
+      grid.appendChild(card);
+    });
+  }
+  wrap.appendChild(grid);
+
+  // Upload FAB
+  const fab = el("button",{style:{position:"fixed",bottom:"72px",right:"16px",background:"#1c1c1e",color:"#fff",border:"none",borderRadius:"50%",width:"52px",height:"52px",fontSize:"22px",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,0,0,0.25)",zIndex:90,display:"flex",alignItems:"center",justifyContent:"center"}},"+");
+  fab.addEventListener("click",()=>setState({showUpload:true}));
+  wrap.appendChild(fab);
+
+  return wrap;
+}
+
+function renderMobileDraftForm() {
+  const f = state.draftForm;
+  const bg = state.darkMode ? "#111112" : "#f8f8f7";
+  const cardBg = state.darkMode ? "#2c2c2e" : "#fff";
+  const borderCol = state.darkMode ? "#3a3a3c" : "#f0f0f0";
+  const textCol = state.darkMode ? "#e5e5e5" : "#1a1a1a";
+  const wrap = el("div",{style:{padding:"12px 16px",display:"flex",flexDirection:"column",gap:"10px"}});
+
+  const card = s => el("div",{style:{background:cardBg,border:"1px solid "+borderCol,borderRadius:"12px",padding:"12px"}});
+  const lbl = t => el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",letterSpacing:"0.06em",marginBottom:"4px"}},t);
+  const inp = (v,cb,ph,type) => {
+    const i = el("input",{style:{width:"100%",padding:"8px 10px",border:"1px solid "+borderCol,borderRadius:"8px",background:bg,color:textCol,fontSize:"13px",boxSizing:"border-box"},placeholder:ph||"",type:type||"text"});
+    i.value=v||"";
+    i.addEventListener("input",e=>cb(e.target.value));
+    return i;
+  };
+  const sel = (v,opts,cb) => {
+    const s = el("select",{style:{width:"100%",padding:"8px 10px",border:"1px solid "+borderCol,borderRadius:"8px",background:bg,color:textCol,fontSize:"13px"}});
+    opts.forEach(o=>{
+      const opt=el("option",{value:o.value||o},o.label||o);
+      if((o.value||o)===v) opt.selected=true;
+      s.appendChild(opt);
+    });
+    s.addEventListener("change",e=>cb(e.target.value));
+    return s;
+  };
+
+  // Post name
+  const nameCard = card();
+  nameCard.appendChild(lbl("POST NAME"));
+  const nameRow = el("div",{style:{display:"flex",gap:"6px"}});
+  const nameI = el("input",{style:{flex:1,padding:"8px 10px",border:"1px solid "+borderCol,borderRadius:"8px",background:bg,color:textCol,fontSize:"12px",fontFamily:"monospace",boxSizing:"border-box"},placeholder:"Auto-generated..."});
+  nameI.value = f.name||"";
+  nameI.addEventListener("input",e=>{state.draftForm.name=e.target.value;state.draftNameOverridden=true;});
+  const autoBtn2 = el("button",{style:{padding:"8px 12px",border:"1px solid "+borderCol,borderRadius:"8px",background:"transparent",color:textCol,fontSize:"12px",cursor:"pointer",whiteSpace:"nowrap",minHeight:"44px"}},"Auto");
+  autoBtn2.addEventListener("click",()=>{state.draftNameOverridden=false;updateDraftName();render();});
+  nameRow.appendChild(nameI);
+  nameRow.appendChild(autoBtn2);
+  nameCard.appendChild(nameRow);
+  wrap.appendChild(nameCard);
+
+  // Account settings
+  const accCard2 = card();
+  accCard2.appendChild(lbl("PLATFORM"));
+  accCard2.appendChild(sel(f.platform, state.platforms.map(p=>({value:p.name,label:p.name})), v=>{
+    state.draftForm.platform=v;
+    const pla=state.accounts.find(a=>a.platform===v&&a.status==="active");
+    state.draftForm.accountId=pla?.id||"";
+    if(!state.draftNameOverridden) updateDraftName();
+    render();
+  }));
+  accCard2.appendChild(el("div",{style:{height:"8px"}}));
+  accCard2.appendChild(lbl("ACCOUNT"));
+  const platAccsM = state.accounts.filter(a=>a.platform===f.platform&&a.status==="active");
+  accCard2.appendChild(sel(f.accountId, platAccsM.map(a=>({value:a.id,label:a.sub+" — "+a.handle})), v=>{state.draftForm.accountId=v;if(!state.draftNameOverridden)updateDraftName();render();}));
+  accCard2.appendChild(el("div",{style:{height:"8px"}}));
+  accCard2.appendChild(lbl("TYPE"));
+  accCard2.appendChild(sel(f.type, state.postTypes.map(t=>({value:t.id,label:t.name})), v=>{state.draftForm.type=v;if(!state.draftNameOverridden)updateDraftName();render();}));
+  accCard2.appendChild(el("div",{style:{height:"8px"}}));
+  accCard2.appendChild(lbl("STATUS"));
+  accCard2.appendChild(sel(f.status, ["draft","scheduled","posted"].map(s=>({value:s,label:s})), v=>{state.draftForm.status=v;}));
+  accCard2.appendChild(el("div",{style:{height:"8px"}}));
+  accCard2.appendChild(lbl("SCHEDULE"));
+  const schedI2 = el("input",{type:"datetime-local",style:{width:"100%",padding:"8px 10px",border:"1px solid "+borderCol,borderRadius:"8px",background:bg,color:textCol,fontSize:"13px",boxSizing:"border-box"}});
+  schedI2.value=f.scheduledAt||"";
+  schedI2.addEventListener("change",e=>{state.draftForm.scheduledAt=e.target.value;if(!state.draftNameOverridden)updateDraftName();});
+  accCard2.appendChild(schedI2);
+  wrap.appendChild(accCard2);
+
+  // Content picker (compact)
+  const pickerCard = card();
+  pickerCard.appendChild(lbl("CONTENT"));
+  const mcM = state.model==="all"?state.content:state.content.filter(c=>c.modelId===state.model);
+  // Search + SFW filter
+  const pickerRow = el("div",{style:{display:"flex",gap:"6px",marginBottom:"8px"}});
+  const pickerSrch = el("input",{style:{flex:1,padding:"6px 10px",border:"1px solid "+borderCol,borderRadius:"8px",background:bg,color:textCol,fontSize:"12px",boxSizing:"border-box"},placeholder:"Search..."});
+  pickerSrch.value=state.draftPickerSearch||"";
+  pickerSrch.addEventListener("input",e=>{state.draftPickerSearch=e.target.value;render();});
+  pickerRow.appendChild(pickerSrch);
+  ["All","SFW","NSFW"].forEach(opt=>{
+    const active=(state.draftPickerSfw||"All")===opt;
+    const b=el("button",{style:{padding:"6px 10px",borderRadius:"20px",border:"1px solid",borderColor:active?"#1c1c1e":borderCol,background:active?"#1c1c1e":"transparent",color:active?"#fff":"#6b7280",fontSize:"11px",cursor:"pointer",whiteSpace:"nowrap",minHeight:"36px"}},opt);
+    b.addEventListener("click",()=>{state.draftPickerSfw=opt;render();});
+    pickerRow.appendChild(b);
+  });
+  pickerCard.appendChild(pickerRow);
+  const pickerSearch2=state.draftPickerSearch||"";
+  const pickerSfw2=state.draftPickerSfw||"All";
+  const filtM=mcM.filter(c=>{
+    const sOk=!pickerSearch2||c.label.toLowerCase().includes(pickerSearch2.toLowerCase());
+    const swOk=pickerSfw2==="All"||c.sfwNsfw===pickerSfw2;
+    return sOk&&swOk;
+  });
+  const pickerListM=el("div",{style:{maxHeight:"260px",overflowY:"auto",display:"flex",flexDirection:"column",gap:"4px"}});
+  filtM.forEach(c=>{
+    const isPicked=f.contentIds.includes(c.id);
+    const posted=(c.posts||[]).filter(p=>state.accounts.find(a=>a.id===p.accountId)?.platform===f.platform);
+    const isPosted=posted.length>0;
+    const bdr=isPicked?"2px solid #1c1c1e":isPosted?"2px solid #f59e0b":"1px solid "+borderCol;
+    const rbg=isPicked?(state.darkMode?"#3a3a3c":"#f9f9f9"):isPosted?"#fffbeb":"transparent";
+    const row=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",padding:"8px",borderRadius:"8px",border:bdr,background:rbg,cursor:"pointer"}});
+    row.addEventListener("click",()=>{
+      if(isPicked){state.draftForm.contentIds=f.contentIds.filter(x=>x!==c.id);render();}
+      else if(isPosted){
+        const pn=posted.map(p=>p.postName||p.date).join(", ");
+        if(confirm("Already posted as "+pn+". Use again?")){state.draftForm.contentIds=[...f.contentIds,c.id];render();}
+      }else{state.draftForm.contentIds=[...f.contentIds,c.id];render();}
+    });
+    const th=el("div",{style:{width:"36px",height:"36px",borderRadius:"6px",background:"#f3f4f6",flexShrink:0,overflow:"hidden"}});
+    if(c.driveId){const img=el("img",{style:{width:"100%",height:"100%",objectFit:"cover"}});img.onerror=()=>{img.style.display="none";};setThumbSrc(img,c.driveId);th.appendChild(img);}
+    row.appendChild(th);
+    const inf=el("div",{style:{flex:1,minWidth:0}});
+    inf.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",color:textCol}},c.label));
+    if(isPosted){const pn=posted.map(p=>p.postName||p.date).join(", ");inf.appendChild(el("div",{style:{fontSize:"10px",color:"#b45309",fontFamily:"monospace"}},"⚠ "+pn));}
+    row.appendChild(inf);
+    if(isPicked) row.appendChild(el("span",{style:{fontSize:"16px",color:"#22c55e",flexShrink:0}},"✓"));
+    pickerListM.appendChild(row);
+  });
+  pickerCard.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",marginBottom:"4px",fontFamily:"monospace"}},filtM.length+" shown · "+f.contentIds.length+" selected"));
+  pickerCard.appendChild(pickerListM);
+  wrap.appendChild(pickerCard);
+
+  // Selected content order & overlays
+  if (f.contentIds.length) {
+    const ovCard=card();
+    ovCard.appendChild(lbl("ORDER & OVERLAYS"));
+    f.contentIds.forEach((id,idx)=>{
+      const c=state.content.find(x=>x.id===id);
+      const row=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",padding:"8px",borderRadius:"8px",background:state.darkMode?"#1c1c1e":"#f9f9f9",marginBottom:"6px",border:"1px solid "+borderCol}});
+      row.appendChild(el("span",{style:{fontSize:"12px",color:"#9ca3af",userSelect:"none",minWidth:"20px"}},(idx+1)+"."));
+      const inf2=el("div",{style:{flex:1,minWidth:0}});
+      inf2.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",color:textCol,marginBottom:"4px"}},c?.label||""));
+      const ovI=el("input",{style:{width:"100%",padding:"6px 8px",border:"1px solid "+borderCol,borderRadius:"6px",background:bg,color:textCol,fontSize:"11px",boxSizing:"border-box"},placeholder:"Overlay text..."});
+      ovI.value=f.overlays[id]||"";
+      ovI.addEventListener("input",e=>{state.draftForm.overlays[id]=e.target.value;});
+      inf2.appendChild(ovI);
+      row.appendChild(inf2);
+      const remB=el("button",{style:{border:"none",background:"transparent",cursor:"pointer",color:"#9ca3af",fontSize:"18px",minWidth:"36px",minHeight:"36px",display:"flex",alignItems:"center",justifyContent:"center"}},"×");
+      remB.addEventListener("click",()=>{state.draftForm.contentIds=f.contentIds.filter(x=>x!==id);render();});
+      row.appendChild(remB);
+      ovCard.appendChild(row);
+    });
+    wrap.appendChild(ovCard);
+  }
+
+  // Caption / hashtags
+  const capCard=card();
+  capCard.appendChild(lbl("CAPTION"));
+  const capTA2=el("textarea",{style:{width:"100%",padding:"8px 10px",border:"1px solid "+borderCol,borderRadius:"8px",background:bg,color:textCol,fontSize:"13px",boxSizing:"border-box",resize:"vertical",minHeight:"80px"},rows:3,placeholder:"Write your caption..."});
+  capTA2.value=f.caption||"";
+  capTA2.addEventListener("input",e=>{state.draftForm.caption=e.target.value;});
+  capCard.appendChild(capTA2);
+  capCard.appendChild(el("div",{style:{height:"8px"}}));
+  capCard.appendChild(lbl("HASHTAGS"));
+  const hashI2=el("input",{style:{width:"100%",padding:"8px 10px",border:"1px solid "+borderCol,borderRadius:"8px",background:bg,color:textCol,fontSize:"13px",boxSizing:"border-box"},placeholder:"#fyp #pickleball"});
+  hashI2.value=f.hashtags||"";
+  hashI2.addEventListener("input",e=>{state.draftForm.hashtags=e.target.value;});
+  capCard.appendChild(hashI2);
+  wrap.appendChild(capCard);
+
+  // Save / Clear
+  const btnRow2=el("div",{style:{display:"flex",gap:"8px",paddingBottom:"8px"}});
+  const isEdit2=!!state.editingDraft;
+  const saveB2=el("button",{style:{flex:1,padding:"12px",border:"none",borderRadius:"10px",background:"#1c1c1e",color:"#fff",fontSize:"14px",fontWeight:600,cursor:"pointer",minHeight:"48px"}},isEdit2?"Save Changes":"Save Draft");
+  saveB2.addEventListener("click",()=>{
+    const draft={
+      id:state.editingDraft?.id||"d"+Date.now(), name:f.name||autoName(f.platform,f.accountId,f.type,f.scheduledAt,1),
+      accountId:f.accountId, platform:f.platform, type:f.type,
+      contentIds:[...f.contentIds], overlays:f.contentIds.map(id=>f.overlays[id]||""),
+      caption:f.caption, hashtags:f.hashtags, scheduledAt:f.scheduledAt, status:f.status, postOrder:1,
+      metrics:state.editingDraft?.metrics||{views:0,likes:0,comments:0}
+    };
+    const newDrafts=isEdit2?state.drafts.map(d=>d.id===draft.id?draft:d):[...state.drafts,draft];
+    let newContent=state.content;
+    if(f.status==="posted"){
+      newContent=state.content.map(c=>{
+        if(!draft.contentIds.includes(c.id)) return c;
+        const ap=(c.posts||[]).some(p=>p.accountId===draft.accountId&&p.date===draft.scheduledAt?.slice(0,10));
+        if(ap) return c;
+        return {...c,posts:[...(c.posts||[]),{accountId:draft.accountId,date:draft.scheduledAt?.slice(0,10)||"",postName:draft.name||"",views:0,likes:0,comments:0}]};
+      });
+    }
+    setState({drafts:newDrafts,content:newContent,editingDraft:null,draftForm:{platform:"Instagram",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},draftNameOverridden:false});
+    if(isAuthenticated()) saveToSheets();
+  });
+  const clearB2=el("button",{style:{flex:1,padding:"12px",border:"1px solid "+(state.darkMode?"#3a3a3c":"#e5e7eb"),borderRadius:"10px",background:"transparent",color:state.darkMode?"#aeaeb2":"#6b7280",fontSize:"14px",cursor:"pointer",minHeight:"48px"}},isEdit2?"Cancel":"Clear");
+  clearB2.addEventListener("click",()=>{
+    setState({editingDraft:null,draftForm:{platform:"Instagram",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},draftNameOverridden:false});
+  });
+  btnRow2.appendChild(saveB2);
+  btnRow2.appendChild(clearB2);
+  wrap.appendChild(btnRow2);
+
+  return wrap;
+}
+
+function renderMobileDraftModal() {
+  const d = state.showDraftModal;
+  const st = getStatus(d);
+  const acc = state.accounts.find(a=>a.id===d.accountId);
+  const con = (d.contentIds||[]).map(id=>state.content.find(c=>c.id===id)).filter(Boolean);
+  const past = isPast(d.scheduledAt);
+  const bg = state.darkMode ? "#1c1c1e" : "#fff";
+  const borderCol = state.darkMode ? "#3a3a3c" : "#f0f0f0";
+  const textCol = state.darkMode ? "#e5e5e5" : "#1a1a1a";
+
+  const overlay = el("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:500,display:"flex",flexDirection:"column",justifyContent:"flex-end"}});
+  overlay.addEventListener("click",()=>setState({showDraftModal:null}));
+  const sheet = el("div",{style:{background:bg,borderRadius:"20px 20px 0 0",maxHeight:"90vh",overflowY:"auto",padding:"20px 16px",paddingBottom:"env(safe-area-inset-bottom,20px)"}});
+  sheet.addEventListener("click",e=>e.stopPropagation());
+
+  // Handle bar
+  const handleBar = el("div",{style:{width:"36px",height:"4px",borderRadius:"2px",background:"#e5e7eb",margin:"0 auto 16px"}});
+  sheet.appendChild(handleBar);
+
+  // Header
+  const hdr = el("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"14px"}});
+  hdr.appendChild(el("div",{style:{fontSize:"15px",fontWeight:600,color:textCol}},d.type+" — "+(acc?.sub||"")));
+  const closeBtnM = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"22px",color:"#9ca3af",minWidth:"44px",minHeight:"44px",display:"flex",alignItems:"center",justifyContent:"center"}},"×");
+  closeBtnM.addEventListener("click",()=>setState({showDraftModal:null}));
+  hdr.appendChild(closeBtnM);
+  sheet.appendChild(hdr);
+
+  // Status badge
+  const stBadge = el("div",{style:{display:"inline-flex",alignItems:"center",fontSize:"11px",padding:"3px 10px",borderRadius:"20px",background:SBG[st],color:STX[st],fontWeight:600,fontFamily:"monospace",marginBottom:"12px"}},st.toUpperCase());
+  sheet.appendChild(stBadge);
+
+  // Status buttons
+  sheet.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",letterSpacing:"0.06em",marginBottom:"6px"}},"CHANGE STATUS"));
+  const statusBtnsM = el("div",{style:{display:"flex",gap:"6px",flexWrap:"wrap",marginBottom:"14px"}});
+  const statusOptsM = past?["posted","missed"]:["draft","scheduled","posted"];
+  statusOptsM.forEach(s=>{
+    const isActive=st===s;
+    const sb=el("button",{style:{padding:"8px 14px",borderRadius:"20px",border:"1.5px solid",borderColor:isActive?SC[s]:"#e5e7eb",background:isActive?SBG[s]:"transparent",color:isActive?STX[s]:"#9ca3af",fontSize:"12px",fontWeight:isActive?"600":"400",cursor:"pointer",fontFamily:"monospace",minHeight:"40px"}},s);
+    sb.addEventListener("click",()=>{
+      let updatedContent=state.content;
+      if(s==="posted"){
+        updatedContent=state.content.map(c=>{
+          if(!(d.contentIds||[]).includes(c.id)) return c;
+          const ap=(c.posts||[]).some(p=>p.accountId===d.accountId&&p.date===d.scheduledAt?.slice(0,10));
+          if(ap) return c;
+          return {...c,posts:[...(c.posts||[]),{accountId:d.accountId,date:d.scheduledAt?.slice(0,10)||"",postName:d.name||"",views:0,likes:0,comments:0}]};
+        });
+      } else {
+        updatedContent=state.content.map(c=>{
+          if(!(d.contentIds||[]).includes(c.id)) return c;
+          return {...c,posts:(c.posts||[]).filter(p=>p.accountId!==d.accountId||p.date!==d.scheduledAt?.slice(0,10))};
+        });
+      }
+      setState({drafts:state.drafts.map(x=>x.id===d.id?{...x,status:s}:x),content:updatedContent,showDraftModal:{...d,status:s}});
+      if(isAuthenticated()) saveToSheets();
+    });
+    statusBtnsM.appendChild(sb);
+  });
+  sheet.appendChild(statusBtnsM);
+
+  // Date/time
+  sheet.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",letterSpacing:"0.06em",marginBottom:"6px"}},"DATE AND TIME"));
+  const dtI2=el("input",{type:"datetime-local",style:{width:"100%",padding:"8px 10px",border:"1px solid "+borderCol,borderRadius:"8px",background:state.darkMode?"#3a3a3c":"#f9f9f9",color:textCol,fontSize:"13px",marginBottom:"14px",boxSizing:"border-box"}});
+  dtI2.value=d.scheduledAt||"";
+  dtI2.addEventListener("blur",e=>{
+    const ns=e.target.value;
+    if(!ns) return;
+    const newSt=d.status==="posted"?"posted":(new Date(ns)>NOW?"scheduled":"missed");
+    setState({drafts:state.drafts.map(x=>x.id===d.id?{...x,scheduledAt:ns,status:newSt}:x),showDraftModal:{...d,scheduledAt:ns,status:newSt}});
+  });
+  sheet.appendChild(dtI2);
+
+  // Content slides (tap to open in Drive)
+  if (con.length) {
+    sheet.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",letterSpacing:"0.06em",marginBottom:"6px"}},"CONTENT"));
+    con.forEach((c,i)=>{
+      const cRow=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",background:state.darkMode?"#3a3a3c":"#f9f9f9",borderRadius:"8px",padding:"8px 10px",marginBottom:"6px",cursor:c.driveUrl?"pointer":"default"}});
+      if(c.driveUrl) cRow.addEventListener("click",()=>window.open(c.driveUrl,"_blank"));
+      const th=el("div",{style:{width:"44px",height:"44px",borderRadius:"8px",background:"#f3f4f6",flexShrink:0,overflow:"hidden",position:"relative"}});
+      if(c.driveId){const img=el("img",{style:{width:"100%",height:"100%",objectFit:"cover"}});img.onerror=()=>{img.style.display="none";};setThumbSrc(img,c.driveId);th.appendChild(img);}
+      cRow.appendChild(th);
+      const ci=el("div",{style:{flex:1,minWidth:0}});
+      ci.appendChild(el("div",{style:{fontSize:"12px",fontWeight:500,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",color:textCol}},c.label));
+      const ov=Array.isArray(d.overlays)?d.overlays[i]:d.overlays?.[c.id];
+      if(ov) ci.appendChild(el("div",{style:{fontSize:"11px",color:"#6b7280",fontFamily:"monospace",marginTop:"2px"}},'"'+ov+'"'));
+      cRow.appendChild(ci);
+      if(c.driveUrl) cRow.appendChild(el("span",{style:{fontSize:"16px",color:"#3b82f6",flexShrink:0}},"↗"));
+      sheet.appendChild(cRow);
+    });
+  }
+
+  if(d.caption){sheet.appendChild(el("div",{style:{fontSize:"11px",color:textCol,lineHeight:1.4,marginBottom:"6px",marginTop:"10px"}},d.caption));}
+  if(d.hashtags){sheet.appendChild(el("div",{style:{fontSize:"11px",color:"#3b82f6",fontFamily:"monospace",marginBottom:"12px"}},d.hashtags));}
+
+  // Action buttons
+  const actRow=el("div",{style:{display:"flex",gap:"8px",marginTop:"8px"}});
+  const delB=el("button",{style:{padding:"10px 14px",border:"1px solid #fecaca",borderRadius:"8px",background:"#fef2f2",color:"#ef4444",fontSize:"13px",cursor:"pointer",minHeight:"44px"}},"Delete");
+  delB.addEventListener("click",()=>{
+    if(!confirm("Delete this post?")) return;
+    setState({drafts:state.drafts.filter(x=>x.id!==d.id),showDraftModal:null});
+    if(isAuthenticated()) saveToSheets();
+  });
+  const editB=el("button",{style:{flex:1,padding:"10px",border:"1px solid "+(state.darkMode?"#3a3a3c":"#e5e7eb"),borderRadius:"8px",background:"transparent",color:textCol,fontSize:"13px",cursor:"pointer",minHeight:"44px"}},"Edit Post");
+  editB.addEventListener("click",()=>{
+    const ovObj={};
+    (d.contentIds||[]).forEach((id,i)=>{ovObj[id]=d.overlays[i]||"";});
+    setState({editingDraft:d,draftForm:{platform:d.platform,accountId:d.accountId,type:d.type,contentIds:[...d.contentIds],overlays:ovObj,caption:d.caption,hashtags:d.hashtags,scheduledAt:d.scheduledAt,name:d.name,status:d.status},draftNameOverridden:true,mobileTab:"draft",showDraftModal:null});
+  });
+  const doneB=el("button",{style:{flex:1,padding:"10px",border:"none",borderRadius:"8px",background:"#1c1c1e",color:"#fff",fontSize:"13px",fontWeight:600,cursor:"pointer",minHeight:"44px"}},"Done");
+  doneB.addEventListener("click",()=>setState({showDraftModal:null}));
+  actRow.appendChild(delB);
+  actRow.appendChild(editB);
+  actRow.appendChild(doneB);
+  sheet.appendChild(actRow);
+
+  overlay.appendChild(sheet);
+  return overlay;
 }
 
 function renderMobileCalendar() {
@@ -2705,7 +3237,7 @@ function renderMobileMetrics() {
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
 function renderApp() {
-  const app = div("app",{});
+  const app = div(state.darkMode?"app dark":"app",{});
   app.appendChild(renderSidebar());
 
   const main = div("main",{});
