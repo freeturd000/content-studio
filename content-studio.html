@@ -187,6 +187,8 @@ let state = {
   showMetricsUpdate: null,
   showUpload: false,
   editingDraft: null,
+  fetchingThumbnails: false,
+  fetchThumbProgress: "",
 
   // draft form
   draftForm: {platform:"Instagram",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},
@@ -844,40 +846,37 @@ async function uploadFile(file, folderId, modelName, category, subfolder, sfwNsf
 }
 
 // ── FETCH MISSING THUMBNAILS ─────────────────────────────────────────────────
-async function fetchMissingThumbnails(onProgress) {
+async function fetchMissingThumbnails() {
   if (!isAuthenticated()) { alert("Connect Google first."); return; }
   const missing = state.content.filter(c => c.driveId && !c.thumbnailUrl);
-  if (!missing.length) { alert("No missing thumbnails found."); return; }
+  if (!missing.length) { setState({fetchingThumbnails:false, fetchThumbProgress:"No missing thumbnails."}); return; }
   let updated = 0;
   let newContent = [...state.content];
   for (let i = 0; i < missing.length; i++) {
     const c = missing[i];
-    onProgress(`Fetching ${i+1} of ${missing.length}…`);
+    setState({fetchThumbProgress:`Fetching ${i+1} of ${missing.length}…`});
     try {
       const meta = await fetch(
         "https://www.googleapis.com/drive/v3/files/"+c.driveId+"?fields=thumbnailLink,mimeType",
         {headers:{Authorization:"Bearer "+state.token}}
       ).then(r=>r.json());
       let thumbUrl = meta.thumbnailLink || "";
-      // For video or when direct URL won't load in img tag, blob-fetch instead
       if (thumbUrl && meta.mimeType?.startsWith("video/")) {
         try {
           const blob = await fetch(thumbUrl, {headers:{Authorization:"Bearer "+state.token}}).then(r=>r.blob());
           thumbUrl = URL.createObjectURL(blob);
-        } catch(e) { /* keep original url */ }
+        } catch(e) {}
       }
       if (thumbUrl) {
         thumbCache[c.driveId] = thumbUrl;
         newContent = newContent.map(x => x.id===c.id ? {...x, thumbnailUrl:thumbUrl} : x);
         updated++;
       }
-    } catch(e) { /* skip */ }
-    // Small delay to avoid Drive rate limits
+    } catch(e) {}
     await new Promise(res => setTimeout(res, 200));
   }
-  setState({content: newContent});
-  if (isAuthenticated()) await saveToSheets();
-  onProgress(`Done — updated ${updated} of ${missing.length} thumbnails.`);
+  setState({content:newContent, fetchingThumbnails:false, fetchThumbProgress:`Done — ${updated} of ${missing.length} updated.`});
+  if (isAuthenticated()) saveToSheets();
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
@@ -1274,17 +1273,17 @@ function renderLibrary() {
     if (isAuthenticated()) saveToSheets();
     alert("Fixed "+fixed+" items.");
   });
-  const thumbStatusEl = el("span",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",display:"none"}});
-  const thumbBtn = renderBtn("Fetch Thumbnails", false, async () => {
-    thumbBtn.disabled = true;
-    thumbStatusEl.style.display = "inline";
-    await fetchMissingThumbnails(msg => { thumbStatusEl.textContent = msg; });
-    thumbBtn.disabled = false;
+  const thumbBtn = renderBtn("Fetch Thumbnails", false, () => {
+    setState({fetchingThumbnails:true, fetchThumbProgress:""});
+    fetchMissingThumbnails();
   });
+  thumbBtn.disabled = state.fetchingThumbnails;
   toolbar.appendChild(scanBtn);
   toolbar.appendChild(reassignBtn);
   toolbar.appendChild(thumbBtn);
-  toolbar.appendChild(thumbStatusEl);
+  if (state.fetchThumbProgress) {
+    toolbar.appendChild(el("span",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace"}},state.fetchThumbProgress));
+  }
   const uploadBtn = renderBtn("Upload", true, () => setState({showUpload:true}));
   toolbar.appendChild(uploadBtn);
   main.appendChild(toolbar);
