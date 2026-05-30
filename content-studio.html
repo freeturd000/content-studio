@@ -1559,15 +1559,20 @@ function renderUploadModal() {
       const result = await uploadFile(selectedFile, currentDriveFolderId, modelName, categoryName, subfolderName, selectedSFW);
 
       if (result) {
-        // Fetch thumbnail link after upload
+        // Fetch thumbnail link — Drive generates it async, retry up to 5x with 3s gaps
+        statusEl.textContent="Processing thumbnail...";
         let thumbnailUrl = "";
-        try {
-          const meta = await fetch("https://www.googleapis.com/drive/v3/files/"+result.driveId+"?fields=thumbnailLink",{headers:{Authorization:"Bearer "+state.token}}).then(r=>r.json());
-          thumbnailUrl = meta.thumbnailLink || "";
-        } catch(e) {}
+        for (let attempt = 0; attempt < 5; attempt++) {
+          try {
+            const meta = await fetch("https://www.googleapis.com/drive/v3/files/"+result.driveId+"?fields=thumbnailLink",{headers:{Authorization:"Bearer "+state.token}}).then(r=>r.json());
+            if (meta.thumbnailLink) { thumbnailUrl = meta.thumbnailLink; break; }
+          } catch(e) {}
+          if (attempt < 4) await new Promise(res => setTimeout(res, 3000));
+        }
         const sfwTag = selectedSFW;
+        const newContentId = "c"+Date.now();
         const newContent = {
-          id:"c"+Date.now(), folderId:selectedFolder, type:"",
+          id:newContentId, folderId:selectedFolder, type:"",
           label:result.name, uploaded:new Date().toISOString().slice(0,10),
           icon:"f", modelId:modelId, sfwNsfw:sfwTag,
           driveId:result.driveId, driveUrl:result.driveUrl,
@@ -1575,6 +1580,23 @@ function renderUploadModal() {
         };
         setState({content:[...state.content,newContent],showUpload:false});
         if (isAuthenticated()) saveToSheets();
+        // If thumbnail still missing, keep retrying in background for up to 60s
+        if (!thumbnailUrl) {
+          (async () => {
+            for (let i = 0; i < 8; i++) {
+              await new Promise(res => setTimeout(res, 5000));
+              try {
+                const meta = await fetch("https://www.googleapis.com/drive/v3/files/"+result.driveId+"?fields=thumbnailLink",{headers:{Authorization:"Bearer "+state.token}}).then(r=>r.json());
+                if (meta.thumbnailLink) {
+                  thumbCache[result.driveId] = meta.thumbnailLink;
+                  setState({content:state.content.map(c=>c.id===newContentId?{...c,thumbnailUrl:meta.thumbnailLink}:c)});
+                  if (isAuthenticated()) saveToSheets();
+                  break;
+                }
+              } catch(e) {}
+            }
+          })();
+        }
       } else {
         statusEl.textContent="Upload failed. Try again.";
         upBtn.textContent="Upload to Drive"; upBtn.disabled=false;
