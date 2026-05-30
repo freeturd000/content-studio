@@ -202,8 +202,10 @@ function folderPath(folderId, folders) {
 
 function autoName(platform, accountId, type, date, order) {
   const code = platform === "Instagram" ? "IG" : "TT";
+  const acc = state.accounts.find(a=>a.id===accountId);
+  const accCode = acc ? acc.sub.replace(/\s+/g,"") : accountId;
   const d = date ? date.slice(0,10).replace(/-/g,"") : "00000000";
-  return code+"-"+accountId+"-"+type+"-"+String(order).padStart(3,"0")+"-"+d;
+  return code+"-"+accCode+"-"+type+"-"+String(order).padStart(3,"0")+"-"+d;
 }
 
 function setState(updates) {
@@ -887,7 +889,6 @@ function renderSidebar() {
     {id:"library", label:"Content Library"},
     {id:"draft",   label:"Draft Post"},
     {id:"calendar",label:"Calendar"},
-    {id:"metrics", label:"Metrics"},
   ].forEach(t => {
     const btn = el("button", {class:"nav-btn"+(state.tab===t.id?" active":"")}, t.label);
     btn.addEventListener("click", () => setState({tab:t.id}));
@@ -1792,10 +1793,10 @@ function renderCalendar() {
       const ot = draft.scheduledAt?.slice(11)||"08:00";
       const ns = nd+"T"+ot;
       const newSt = draft.status==="posted"?"posted":(new Date(ns)>NOW?"scheduled":"missed");
-      // Auto-update name with new date if name contains old date pattern
+      // Update date in name - replace 8-digit date pattern at end
       const oldDate = draft.scheduledAt?.slice(0,10)?.replace(/-/g,"")||"";
       const newDate = nd.replace(/-/g,"");
-      const newName = draft.name?.includes(oldDate) ? draft.name.replace(oldDate,newDate) : draft.name;
+      const newName = draft.name?.includes(oldDate) ? draft.name.replace(oldDate, newDate) : draft.name;
       setState({drafts:state.drafts.map(x=>x.id===draftId?{...x,scheduledAt:ns,status:newSt,name:newName}:x)});
       if (isAuthenticated()) saveToSheets();
     });
@@ -2667,7 +2668,7 @@ function renderApp() {
   if (state.tab==="library")  content.appendChild(renderLibrary());
   if (state.tab==="draft")    content.appendChild(renderDraft());
   if (state.tab==="calendar") content.appendChild(renderCalendar());
-  if (state.tab==="metrics")  content.appendChild(renderMetrics());
+  // Metrics removed from web - available on mobile only
   main.appendChild(content);
   app.appendChild(main);
 
