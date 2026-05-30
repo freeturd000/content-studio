@@ -103,15 +103,10 @@ let state = {
   syncError: null,
   lastSynced: null,
 
-  models:    [{id:"all",label:"All Models"},{id:"lilly",label:"Lilly Rose"}],
+  models:    [{id:"all",label:"All Models"}],
   platforms: [{id:"instagram",name:"Instagram",color:"#E1306C"},{id:"tiktok",name:"TikTok",color:"#555"}],
   postTypes: [{id:"Story",name:"Story"},{id:"Slideshow",name:"Slideshow"},{id:"Carousel",name:"Carousel"},{id:"Reel",name:"Reel"}],
-  accounts:  [
-    {id:"ig-main", handle:"@thelillyrosey",platform:"Instagram",sub:"IG Main",  color:"#E1306C",followers:1240,status:"active",modelId:"lilly"},
-    {id:"ig-reels",handle:"@thelillyrosey",platform:"Instagram",sub:"IG Reels", color:"#E1306C",followers:890, status:"active",modelId:"lilly"},
-    {id:"tt-1",    handle:"@thelillyrosey",platform:"TikTok",   sub:"TikTok 1", color:"#555",   followers:3400,status:"active",modelId:"lilly"},
-    {id:"tt-2",    handle:"@lillsrosey",   platform:"TikTok",   sub:"TikTok 2", color:"#555",   followers:1800,status:"inactive",modelId:"lilly"},
-  ],
+  accounts:  [],
   folders: [
     {id:"sfw",  name:"SFW",          parentId:null, sfwNsfw:"SFW",  driveId:null, locked:true},
     {id:"nsfw", name:"NSFW",         parentId:null, sfwNsfw:"NSFW", driveId:null, locked:true},
@@ -163,9 +158,24 @@ let state = {
   editingDraft: null,
 
   // draft form
-  draftForm: {platform:"Instagram",accountId:"ig-main",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},
+  draftForm: {platform:"Instagram",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},
   draftNameOverridden: false,
 };
+
+// ── THUMBNAIL HELPER ─────────────────────────────────────────────────────────
+function setThumbSrc(img, driveId) {
+  if (!driveId) return;
+  const url = "https://drive.google.com/thumbnail?id="+driveId+"&sz=w400";
+  if (isAuthenticated()) {
+    // Fetch with auth header to get around session requirements
+    fetch(url, {headers:{Authorization:"Bearer "+state.token}})
+      .then(r => r.blob())
+      .then(blob => { img.src = URL.createObjectURL(blob); })
+      .catch(() => { img.src = url; }); // fallback to direct
+  } else {
+    img.src = url;
+  }
+}
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 const NOW = new Date();
@@ -1148,10 +1158,8 @@ function renderLibrary() {
       thumb.style.background = thumbColors[c.icon]||"#f3f4f6";
       if (c.thumbnailUrl) {
         const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover",position:"absolute",top:0,left:0}});
-        // Use Drive file ID to construct thumbnail URL that works when logged into Google
-        const thumbSrc = c.driveId ? "https://drive.google.com/thumbnail?id="+c.driveId+"&sz=w400" : (c.thumbnailUrl||"");
-        img.src = thumbSrc;
-        img.onerror = ()=>{ img.style.display="none"; thumb.appendChild(document.createTextNode("Photo")); };
+        img.onerror = ()=>{ img.style.display="none"; };
+        setThumbSrc(img, c.driveId);
         thumb.appendChild(img);
       } else {
         thumb.appendChild(txt(thumbLabels[c.icon]||"File"));
@@ -1189,7 +1197,8 @@ function renderLibrary() {
     const thumbP = div("", {width:"100%",aspectRatio:"9/12",borderRadius:"10px",background:"#f8f8f7",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px",color:"#9ca3af",marginBottom:"12px",overflow:"hidden",position:"relative"});
     if (sel.thumbnailUrl) {
       const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover",position:"absolute",top:0,left:0}});
-      img.src = sel.driveId ? "https://drive.google.com/thumbnail?id="+sel.driveId+"&sz=w400" : (sel.thumbnailUrl||"");
+      img.onerror = ()=>{ img.style.display="none"; };
+      setThumbSrc(img, sel.driveId);
       img.onerror = ()=>{ img.style.display="none"; thumbP.appendChild(document.createTextNode("Photo")); };
       thumbP.appendChild(img);
     } else {
@@ -2379,8 +2388,8 @@ function renderMobileCalendar() {
           const thumb = el("div",{style:{width:"56px",height:"56px",borderRadius:"8px",background:"#f3f4f6",flexShrink:0,overflow:"hidden",position:"relative"}});
           if (c.driveId) {
             const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover"}});
-            img.src = "https://drive.google.com/thumbnail?id="+c.driveId+"&sz=w120";
             img.onerror = ()=>{ img.style.display="none"; };
+            setThumbSrc(img, c.driveId);
             thumb.appendChild(img);
           }
           thumbRow.appendChild(thumb);
@@ -2498,8 +2507,8 @@ function renderMobileMetrics() {
       if (p.driveId||p.content.driveId) {
         const thumb = el("div",{style:{width:"44px",height:"44px",borderRadius:"8px",background:"#f3f4f6",flexShrink:0,overflow:"hidden"}});
         const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover"}});
-        img.src = "https://drive.google.com/thumbnail?id="+(p.content.driveId||p.driveId)+"&sz=w100";
         img.onerror = ()=>{ img.style.display="none"; };
+        setThumbSrc(img, p.content.driveId||p.driveId);
         thumb.appendChild(img);
         header.appendChild(thumb);
       }
