@@ -1795,7 +1795,12 @@ function renderCalendar() {
       const ot = draft.scheduledAt?.slice(11)||"08:00";
       const ns = nd+"T"+ot;
       const newSt = draft.status==="posted"?"posted":(new Date(ns)>NOW?"scheduled":"missed");
-      setState({drafts:state.drafts.map(x=>x.id===draftId?{...x,scheduledAt:ns,status:newSt}:x)});
+      // Auto-update name with new date if name contains old date pattern
+      const oldDate = draft.scheduledAt?.slice(0,10)?.replace(/-/g,"")||"";
+      const newDate = nd.replace(/-/g,"");
+      const newName = draft.name?.includes(oldDate) ? draft.name.replace(oldDate,newDate) : draft.name;
+      setState({drafts:state.drafts.map(x=>x.id===draftId?{...x,scheduledAt:ns,status:newSt,name:newName}:x)});
+      if (isAuthenticated()) saveToSheets();
     });
 
     grid.appendChild(cell);
@@ -2031,42 +2036,7 @@ function renderMetrics() {
   wrap.appendChild(area);
 
   // Update metrics modal
-  if (state.showMetricsUpdate) {
-    const p = state.showMetricsUpdate;
-    const overlay = div("overlay",{});
-    const modal = div("modal",{width:"300px"});
-    const mHeader = div("",{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px"});
-    mHeader.appendChild(el("span",{style:{fontSize:"14px",fontWeight:600}},"Update Metrics"));
-    const mc = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"18px",color:"#9ca3af"}},"x");
-    mc.addEventListener("click",()=>setState({showMetricsUpdate:null}));
-    mHeader.appendChild(mc);
-    modal.appendChild(mHeader);
-
-    const fields = {};
-    [{l:"VIEWS",k:"views",v:p.views||0},{l:"LIKES",k:"likes",v:p.likes||0},{l:"COMMENTS",k:"comments",v:p.comments||0}].forEach(f=>{
-      const row = div("",{marginBottom:"10px"});
-      row.appendChild(el("span",{class:"lbl"},f.l));
-      const inp = el("input",{type:"number",class:"inp",value:f.v});
-      fields[f.k] = inp;
-      row.appendChild(inp);
-      modal.appendChild(row);
-    });
-
-    const saveBtn = renderBtn("Save", true, ()=>{
-      const views    = parseInt(fields.views.value)||0;
-      const likes    = parseInt(fields.likes.value)||0;
-      const comments = parseInt(fields.comments.value)||0;
-      if (p.id) {
-        setState({drafts:state.drafts.map(d=>d.id===p.id?{...d,metrics:{views,likes,comments}}:d), showMetricsUpdate:null});
-      } else {
-        setState({showMetricsUpdate:null});
-      }
-      if (isAuthenticated()) saveToSheets();
-    }, {width:"100%",justifyContent:"center",marginTop:"6px"});
-    modal.appendChild(saveBtn);
-    overlay.appendChild(modal);
-    wrap.appendChild(overlay);
-  }
+  if (state.showMetricsUpdate) wrap.appendChild(renderMetricsUpdateModal());
 
   return wrap;
 }
@@ -2291,6 +2261,47 @@ function renderAddAccountModal() {
   return overlay;
 }
 
+// ── METRICS UPDATE MODAL ─────────────────────────────────────────────────────
+function renderMetricsUpdateModal() {
+  const p = state.showMetricsUpdate;
+  const overlay = div("overlay",{});
+  overlay.addEventListener("click",()=>setState({showMetricsUpdate:null}));
+  const modal = div("modal",{width:"300px"});
+  modal.addEventListener("click",e=>e.stopPropagation());
+  const mHeader = div("",{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px"});
+  mHeader.appendChild(el("span",{style:{fontSize:"14px",fontWeight:600}},"Update Metrics"));
+  const mc = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"18px",color:"#9ca3af"}},"x");
+  mc.addEventListener("click",()=>setState({showMetricsUpdate:null}));
+  mHeader.appendChild(mc);
+  modal.appendChild(mHeader);
+  if (p.draft?.name||p.content?.label) {
+    modal.appendChild(el("div",{style:{fontSize:"12px",color:"#6b7280",marginBottom:"12px",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}},p.draft?.name||p.content?.label));
+  }
+  const fields = {};
+  [{l:"VIEWS",k:"views",v:p.views||0},{l:"LIKES",k:"likes",v:p.likes||0},{l:"COMMENTS",k:"comments",v:p.comments||0}].forEach(f=>{
+    const row = div("",{marginBottom:"10px"});
+    row.appendChild(el("span",{class:"lbl"},f.l));
+    const inp = el("input",{type:"number",class:"inp",value:f.v});
+    fields[f.k] = inp;
+    row.appendChild(inp);
+    modal.appendChild(row);
+  });
+  const saveBtn = renderBtn("Save", true, ()=>{
+    const views    = parseInt(fields.views.value)||0;
+    const likes    = parseInt(fields.likes.value)||0;
+    const comments = parseInt(fields.comments.value)||0;
+    if (p.id) {
+      setState({drafts:state.drafts.map(d=>d.id===p.id?{...d,metrics:{views,likes,comments}}:d), showMetricsUpdate:null});
+    } else {
+      setState({showMetricsUpdate:null});
+    }
+    if (isAuthenticated()) saveToSheets();
+  }, {width:"100%",justifyContent:"center",marginTop:"6px"});
+  modal.appendChild(saveBtn);
+  overlay.appendChild(modal);
+  return overlay;
+}
+
 // ── MOBILE APP ────────────────────────────────────────────────────────────────
 function renderMobileApp() {
   const wrap = el("div",{style:{display:"flex",flexDirection:"column",height:"100vh",background:"#f8f8f7",fontFamily:"system-ui,sans-serif",fontSize:13,overflow:"hidden"}});
@@ -2344,6 +2355,7 @@ function renderMobileApp() {
 
   // Modals
   if (state.showDraftModal) wrap.appendChild(renderMobileDraftModal());
+  if (state.showMetricsUpdate) wrap.appendChild(renderMetricsUpdateModal());
 
   return wrap;
 }
@@ -2541,21 +2553,30 @@ function renderMobileMetrics() {
   filterBar.appendChild(sortRow);
   wrap.appendChild(filterBar);
 
-  // Posts
-  const allPosts = state.content.flatMap(c=>
-    c.posts.filter(p=>{
-      const acc = state.accounts.find(a=>a.id===p.accountId);
-      const aOk = state.mobileMetricsAccount==="all"||p.accountId===state.mobileMetricsAccount;
-      return aOk;
-    }).map(p=>({...p,content:c,acc:state.accounts.find(a=>a.id===p.accountId)}))
-  );
+  // Posts - use posted drafts same as web
+  const mobPostedDrafts = state.drafts.filter(d=>{
+    const st = getStatus(d);
+    const aOk = state.mobileMetricsAccount==="all"||d.accountId===state.mobileMetricsAccount;
+    return st==="posted" && aOk;
+  });
+
+  const allPosts = mobPostedDrafts.map(d=>{
+    const acc = state.accounts.find(a=>a.id===d.accountId);
+    const con = (d.contentIds||[]).map(id=>state.content.find(c=>c.id===id)).filter(Boolean);
+    return {
+      id:d.id, accountId:d.accountId,
+      date:d.scheduledAt?.slice(0,10)||"",
+      views:d.metrics?.views||0, likes:d.metrics?.likes||0, comments:d.metrics?.comments||0,
+      acc, content:con[0]||{label:d.name,driveId:null}, draft:d, type:d.type,
+    };
+  });
 
   const sorted = [...allPosts].sort((a,b)=>{
     let av,bv;
-    if(state.mobileMetricsSortBy==="date"){av=new Date(a.date);bv=new Date(b.date);}
-    else if(state.mobileMetricsSortBy==="views"){av=a.views;bv=b.views;}
-    else if(state.mobileMetricsSortBy==="likes"){av=a.likes;bv=b.likes;}
-    else if(state.mobileMetricsSortBy==="comments"){av=a.comments;bv=b.comments;}
+    if(state.mobileMetricsSortBy==="date"){av=new Date(a.date||0);bv=new Date(b.date||0);}
+    else if(state.mobileMetricsSortBy==="views"){av=a.views||0;bv=b.views||0;}
+    else if(state.mobileMetricsSortBy==="likes"){av=a.likes||0;bv=b.likes||0;}
+    else if(state.mobileMetricsSortBy==="comments"){av=a.comments||0;bv=b.comments||0;}
     else{av=(a.likes+a.comments)/(a.acc?.followers||1);bv=(b.likes+b.comments)/(b.acc?.followers||1);}
     return state.mobileMetricsSortDir==="desc"?bv-av:av-bv;
   });
