@@ -1345,28 +1345,57 @@ function renderUploadModal() {
       statusEl.textContent="Finding ready folder...";
       const readyFolderId = await syncDriveFolders(modelDriveFolder.id, selectedSFW);
 
-      // Find subfolder in ready
+      // Build the full folder path from app folder hierarchy
+      // e.g. SFW > Selfie > gym -> 05-Ready > 01-Selfie > gym
       const folderObj = state.folders.find(f=>f.id===selectedFolder);
-      const subfolderName = folderObj?.name||"";
-      const readyContents = await driveListFolder(readyFolderId);
-      let subDriveFolder = readyContents.find(f=>f.name.toLowerCase().includes(subfolderName.toLowerCase()));
-      if (!subDriveFolder) {
-        const newId = await driveCreateFolder(subfolderName, readyFolderId);
-        subDriveFolder = {id:newId};
+
+      // Get ancestry chain from selected folder up to sfw/nsfw root
+      const ancestry = [];
+      let cur = folderObj;
+      while (cur && cur.id !== "sfw" && cur.id !== "nsfw") {
+        ancestry.unshift(cur);
+        cur = cur.parentId ? state.folders.find(f=>f.id===cur.parentId) : null;
+      }
+      // ancestry is now e.g. [Selfie, gym] or just [gym] or [Selfie]
+
+      // Navigate Drive folder hierarchy starting from readyFolderId
+      let currentDriveFolderId = readyFolderId;
+      for (const appFolder of ancestry) {
+        const children = await driveListFolder(currentDriveFolderId);
+        // Match by name (Drive folders may have number prefixes like "01 - Selfie")
+        let match = children.find(f =>
+          f.mimeType === "application/vnd.google-apps.folder" &&
+          f.name.toLowerCase().replace(/^\d+\s*-\s*/,"") === appFolder.name.toLowerCase()
+        );
+        if (!match) {
+          // Create the folder if it doesn't exist
+          const newId = await driveCreateFolder(appFolder.name, currentDriveFolderId);
+          match = {id: newId};
+        }
+        currentDriveFolderId = match.id;
       }
 
-      // Get parent folder name for naming
-      const parentFolder = folderObj?.parentId ? state.folders.find(f=>f.id===folderObj.parentId) : null;
-      const categoryName = parentFolder?.name||folderObj?.name||"content";
+      // Get names for file naming convention
+      const categoryName = ancestry.length > 1 ? ancestry[0].name : (folderObj?.name||"content");
+      const subfolderName = ancestry.length > 1 ? ancestry[ancestry.length-1].name : (folderObj?.name||"content");
 
       statusEl.textContent="Uploading file...";
-      const result = await uploadFile(selectedFile, subDriveFolder.id, modelName, categoryName, subfolderName, selectedSFW);
+      const result = await uploadFile(selectedFile, currentDriveFolderId, modelName, categoryName, subfolderName, selectedSFW);
 
       if (result) {
+        // Fetch thumbnail link after upload
+        let thumbnailUrl = "";
+        try {
+          const meta = await fetch("https://www.googleapis.com/drive/v3/files/"+result.driveId+"?fields=thumbnailLink",{headers:{Authorization:"Bearer "+state.token}}).then(r=>r.json());
+          thumbnailUrl = meta.thumbnailLink || "";
+        } catch(e) {}
+        const sfwTag = selectedSFW;
         const newContent = {
-          id:"c"+Date.now(), folderId:selectedFolder, type:"Story",
+          id:"c"+Date.now(), folderId:selectedFolder, type:"",
           label:result.name, uploaded:new Date().toISOString().slice(0,10),
-          icon:"f", modelId:modelId, driveId:result.driveId, driveUrl:result.driveUrl, posts:[]
+          icon:"f", modelId:modelId, sfwNsfw:sfwTag,
+          driveId:result.driveId, driveUrl:result.driveUrl,
+          thumbnailUrl, posts:[]
         };
         setState({content:[...state.content,newContent],showUpload:false});
         if (isAuthenticated()) saveToSheets();
