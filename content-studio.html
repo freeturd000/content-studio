@@ -1778,6 +1778,17 @@ function renderCalendar() {
       const postRow = div("",{display:"flex",alignItems:"center",gap:"3px",marginBottom:"1px"});
       postRow.appendChild(el("span",{class:"dot",style:{width:"5px",height:"5px",background:acc?.color||"#888"}}));
       postRow.appendChild(el("span",{style:{fontSize:"9px",color:STX[st],fontFamily:"monospace",fontWeight:500}},"#"+(pi+1)+" "+d.type));
+      // Auto-title button
+      const autoTitleBtn = el("span",{style:{fontSize:"8px",color:STX[st],cursor:"pointer",marginLeft:"2px",opacity:0.7,fontFamily:"monospace"}},"↺");
+      autoTitleBtn.title = "Regenerate title";
+      autoTitleBtn.addEventListener("click",e=>{
+        e.stopPropagation();
+        const order = state.drafts.filter(x=>x.accountId===d.accountId&&x.scheduledAt?.slice(0,10)===d.scheduledAt?.slice(0,10)).indexOf(d)+1;
+        const newName = autoName(d.platform,d.accountId,d.type,d.scheduledAt,order);
+        setState({drafts:state.drafts.map(x=>x.id===d.id?{...x,name:newName}:x)});
+        if (isAuthenticated()) saveToSheets();
+      });
+      postRow.appendChild(autoTitleBtn);
       postEl.appendChild(postRow);
       postEl.appendChild(el("div",{style:{fontSize:"9px",color:"#6b7280",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}},acc?.sub||""));
       postEl.addEventListener("click", () => setState({showDraftModal:d}));
@@ -1895,15 +1906,13 @@ function renderCalendar() {
       if (isAuthenticated()) saveToSheets();
     }, {color:"#ef4444",borderColor:"#fecaca",fontSize:"11px"});
     mBtns.appendChild(delDraftBtn);
-    const editBtn = renderBtn("Edit Draft", false, () => {
+    const editBtn = renderBtn("Edit Post", false, () => {
       const overlaysObj = {};
       (d.contentIds||[]).forEach((id,i)=>{ overlaysObj[id]=d.overlays[i]||""; });
       setState({editingDraft:d, draftForm:{platform:d.platform,accountId:d.accountId,type:d.type,contentIds:[...d.contentIds],overlays:overlaysObj,caption:d.caption,hashtags:d.hashtags,scheduledAt:d.scheduledAt,name:d.name,status:d.status}, draftNameOverridden:true, tab:"draft", showDraftModal:null});
     }, {flex:1,justifyContent:"center",fontSize:"11px"});
-    const dlBtn = renderBtn("Download", false, () => {}, {flex:1,justifyContent:"center",fontSize:"11px"});
     const doneBtn = renderBtn("Done", true, () => setState({showDraftModal:null}), {flex:1,justifyContent:"center",fontSize:"11px"});
     mBtns.appendChild(editBtn);
-    mBtns.appendChild(dlBtn);
     mBtns.appendChild(doneBtn);
     modal.appendChild(mBtns);
     overlay.appendChild(modal);
@@ -1931,13 +1940,14 @@ function renderMetrics() {
   const allPosts = postedDrafts.map(d => {
     const acc = state.accounts.find(a=>a.id===d.accountId);
     const con = (d.contentIds||[]).map(id=>state.content.find(c=>c.id===id)).filter(Boolean);
+    const metrics = d.metrics || {views:0,likes:0,comments:0};
     return {
       id: d.id,
       accountId: d.accountId,
       date: d.scheduledAt?.slice(0,10)||"",
-      views: d.metrics?.views||0,
-      likes: d.metrics?.likes||0,
-      comments: d.metrics?.comments||0,
+      views: parseInt(metrics.views)||0,
+      likes: parseInt(metrics.likes)||0,
+      comments: parseInt(metrics.comments)||0,
       acc,
       content: con[0]||{label:d.name,driveId:null},
       draft: d,
@@ -1959,7 +1969,7 @@ function renderMetrics() {
   const totL = allPosts.reduce((s,p)=>s+(p.likes||0),0);
   const totC = allPosts.reduce((s,p)=>s+(p.comments||0),0);
   const totPosts = allPosts.length;
-  const avgER = totPosts ? ((totL+totC)/totPosts).toFixed(1) : "--";
+  const avgER = totPosts && totV ? ((totL+totC)/totV*100).toFixed(2)+"%" : "--";
 
   // Toolbar
   const toolbar = div("",{padding:"10px 16px",background:"#fff",borderBottom:"1px solid #f0f0f0",display:"flex",alignItems:"center",gap:"8px",flexShrink:0,flexWrap:"wrap"});
@@ -2563,10 +2573,13 @@ function renderMobileMetrics() {
   const allPosts = mobPostedDrafts.map(d=>{
     const acc = state.accounts.find(a=>a.id===d.accountId);
     const con = (d.contentIds||[]).map(id=>state.content.find(c=>c.id===id)).filter(Boolean);
+    const metrics = d.metrics || {views:0,likes:0,comments:0};
     return {
       id:d.id, accountId:d.accountId,
       date:d.scheduledAt?.slice(0,10)||"",
-      views:d.metrics?.views||0, likes:d.metrics?.likes||0, comments:d.metrics?.comments||0,
+      views:parseInt(metrics.views)||0,
+      likes:parseInt(metrics.likes)||0,
+      comments:parseInt(metrics.comments)||0,
       acc, content:con[0]||{label:d.name,driveId:null}, draft:d, type:d.type,
     };
   });
