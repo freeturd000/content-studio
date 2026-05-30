@@ -73,37 +73,51 @@ input,select,textarea{font-family:system-ui;font-size:12px;color:#1a1a1a;}
   .mobile-only{display:none!important;}
 }
 
-/* Dark mode */
-.dark body{background:#111112;}
-.dark .app{background:#111112;}
-.dark .main{background:#111112;}
-.dark .topbar{background:#1c1c1e;border-color:#3a3a3c;color:#e5e5e5;}
-.dark .card{background:#2c2c2e;border-color:#3a3a3c;color:#e5e5e5;}
-.dark .content-area{background:#111112;}
-.dark .inp{background:#3a3a3c;border-color:#48484a;color:#e5e5e5;}
-.dark .sel{background:#3a3a3c;border-color:#48484a;color:#e5e5e5;}
-.dark .overlay .modal{background:#2c2c2e;color:#e5e5e5;border:1px solid #3a3a3c;}
-.dark .btn-secondary{border-color:#48484a;color:#aeaeb2;background:transparent;}
-.dark .btn-secondary:hover{background:#3a3a3c;}
-.dark .lbl{color:#636366;}
-.dark .section-title{color:#636366;}
-.dark .empty-state{color:#636366;}
-.dark input,.dark select,.dark textarea{color:#e5e5e5;}
-/* folder sidebar */
-.dark .app > .main > div:first-child{background:#1c1c1e;}
+/* Dark mode — Claude warm palette */
+:root{
+  --dk-bg:#1a1918;
+  --dk-surface:#252422;
+  --dk-surface2:#2e2c2a;
+  --dk-border:#3a3836;
+  --dk-text:#e8e6e0;
+  --dk-muted:#8e8c88;
+  --dk-sidebar:#111110;
+}
+.dark body{background:var(--dk-bg);}
+.dark .app{background:var(--dk-bg);}
+.dark .main{background:var(--dk-bg);}
+.dark .topbar{background:var(--dk-surface);border-color:var(--dk-border);color:var(--dk-text);}
+.dark .card{background:var(--dk-surface);border-color:var(--dk-border);color:var(--dk-text);}
+.dark .content-area{background:var(--dk-bg);}
+.dark .inp{background:var(--dk-surface2);border-color:var(--dk-border);color:var(--dk-text);}
+.dark .sel{background:var(--dk-surface2);border-color:var(--dk-border);color:var(--dk-text);}
+.dark .overlay{background:rgba(0,0,0,0.6);}
+.dark .overlay .modal{background:var(--dk-surface);color:var(--dk-text);border:1px solid var(--dk-border);}
+.dark .btn-primary{background:#e8e6e0;color:#1a1918;}
+.dark .btn-secondary{border-color:var(--dk-border);color:var(--dk-muted);background:transparent;}
+.dark .btn-secondary:hover{background:var(--dk-surface2);}
+.dark .lbl{color:var(--dk-muted);}
+.dark .section-title{color:var(--dk-muted);}
+.dark .empty-state{color:var(--dk-muted);}
+.dark input,.dark select,.dark textarea{color:var(--dk-text);}
+/* sidebar */
+.dark .sidebar{background:var(--dk-sidebar);}
 /* library folder sidebar */
-.dark [data-panel="folder-sidebar"]{background:#1c1c1e;border-color:#3a3a3c;}
+.dark [data-panel="folder-sidebar"]{background:var(--dk-surface);border-color:var(--dk-border);}
 /* detail panel */
-.dark [data-panel="detail"]{background:#1c1c1e;border-color:#3a3a3c;color:#e5e5e5;}
+.dark [data-panel="detail"]{background:var(--dk-surface);border-color:var(--dk-border);color:var(--dk-text);}
 /* toolbar/filter strips */
-.dark [data-panel="toolbar"]{background:#1c1c1e;border-color:#3a3a3c;}
-/* inline light backgrounds in cards */
-.dark .sc-draft{background:#2c2c2e;border-color:#48484a;}
-.dark .pill{border-color:#48484a;color:#aeaeb2;}
-.dark .google-btn{background:#2c2c2e;border-color:#48484a;color:#e5e5e5;}
-.dark .google-btn:hover{background:#3a3a3c;}
-.dark .modal input,.dark .modal select,.dark .modal textarea{background:#3a3a3c;border-color:#48484a;color:#e5e5e5;}
-.dark .btn-danger{background:#3a0000;color:#f87171;}
+.dark [data-panel="toolbar"]{background:var(--dk-surface);border-color:var(--dk-border);}
+/* calendar cells */
+.dark .sc-draft,.dark .sc-scheduled,.dark .sc-posted,.dark .sc-missed{background:var(--dk-surface2);}
+.dark .pill{border-color:var(--dk-border);color:var(--dk-muted);}
+.dark .google-btn{background:var(--dk-surface2);border-color:var(--dk-border);color:var(--dk-text);}
+.dark .google-btn:hover{background:var(--dk-surface);}
+.dark .modal input,.dark .modal select,.dark .modal textarea{background:var(--dk-surface2);border-color:var(--dk-border);color:var(--dk-text);}
+.dark .btn-danger{background:rgba(220,38,38,0.15);color:#fca5a5;}
+/* nav buttons */
+.dark .nav-btn{color:var(--dk-muted);}
+.dark .nav-btn.active{background:rgba(232,230,224,0.1);color:var(--dk-text);}
 </style>
 </head>
 <body>
@@ -201,16 +215,24 @@ function setThumbSrc(img, driveId) {
       thumbCache[driveId] = url;
       if (img.isConnected) img.src = url;
     } else {
-      // Fallback: fetch actual file as blob
-      return fetch("https://www.googleapis.com/drive/v3/files/"+driveId+"?alt=media", {
-        headers:{Authorization:"Bearer "+state.token}
-      })
-      .then(r=>r.blob())
-      .then(blob=>{
-        const url = URL.createObjectURL(blob);
-        thumbCache[driveId] = url;
-        if (img.isConnected) img.src = url;
-      });
+      // Drive hasn't generated thumbnail yet (common for fresh uploads) — use public embed URL
+      const publicUrl = "https://drive.google.com/thumbnail?id="+driveId+"&sz=w400";
+      if (img.isConnected) {
+        img.src = publicUrl;
+        img.onerror = () => {
+          // Last resort: fetch as blob
+          fetch("https://www.googleapis.com/drive/v3/files/"+driveId+"?alt=media", {
+            headers:{Authorization:"Bearer "+state.token}
+          })
+          .then(r=>r.blob())
+          .then(blob=>{
+            const url = URL.createObjectURL(blob);
+            thumbCache[driveId] = url;
+            if (img.isConnected) { img.onerror=null; img.src = url; }
+          })
+          .catch(()=>{ if(img.isConnected) img.style.display="none"; });
+        };
+      }
     }
   })
   .catch(()=>{ if(img.isConnected) img.style.display="none"; });
@@ -2550,7 +2572,8 @@ function renderMobileApp() {
   const wrap = el("div",{style:{display:"flex",flexDirection:"column",height:"100vh",background:bg,fontFamily:"system-ui,sans-serif",fontSize:"13px",overflow:"hidden"}});
 
   // Top bar
-  const topbar = el("div",{style:{background:"#1c1c1e",padding:"12px 16px",display:"flex",alignItems:"center",gap:"10px",justifyContent:"space-between",flexShrink:0,paddingTop:"env(safe-area-inset-top, 12px)"}});
+  const mTopbarBg = state.darkMode ? "#111110" : "#1c1c1e";
+  const topbar = el("div",{style:{background:mTopbarBg,padding:"12px 16px",display:"flex",alignItems:"center",gap:"10px",justifyContent:"space-between",flexShrink:0,paddingTop:"env(safe-area-inset-top, 12px)"}});
   const hamburger = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"20px",color:"#fff",padding:"4px",minWidth:"44px",minHeight:"44px",display:"flex",alignItems:"center",justifyContent:"center"}},"☰");
   hamburger.addEventListener("click",()=>setState({sidebarOpen:!state.sidebarOpen}));
   topbar.appendChild(hamburger);
@@ -3109,7 +3132,9 @@ function renderMobileCalendar() {
       const con = (d.contentIds||[]).map(id=>state.content.find(c=>c.id===id)).filter(Boolean);
       const past = new Date(d.scheduledAt)<NOW;
 
-      const card = el("div",{style:{background:"#fff",borderRadius:"12px",padding:"14px",marginBottom:"12px",boxShadow:"0 1px 4px rgba(0,0,0,0.08)",border:"1px solid #f0f0f0"}});
+      const cardBg2 = state.darkMode ? "#252422" : "#fff";
+      const cardBorder2 = state.darkMode ? "#3a3836" : "#f0f0f0";
+      const card = el("div",{style:{background:cardBg2,borderRadius:"12px",padding:"14px",marginBottom:"12px",boxShadow:"0 1px 4px rgba(0,0,0,0.08)",border:"1px solid "+cardBorder2}});
 
       // Header
       const header = el("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"10px"}});
@@ -3209,6 +3234,12 @@ function renderMobileCalendar() {
       });
       card.appendChild(statusBtns);
 
+      // Edit button → opens bottom sheet with date/time + full controls
+      const editRowM = el("div",{style:{display:"flex",justifyContent:"flex-end",marginTop:"4px"}});
+      const editCardBtn = el("button",{style:{padding:"6px 14px",border:"1px solid "+(state.darkMode?"#3a3836":"#e5e7eb"),borderRadius:"8px",background:"transparent",color:state.darkMode?"#8e8c88":"#6b7280",fontSize:"11px",cursor:"pointer",fontFamily:"monospace"}},"Edit / Date ↗");
+      editCardBtn.addEventListener("click",()=>setState({showDraftModal:d}));
+      editRowM.appendChild(editCardBtn);
+      card.appendChild(editRowM);
 
       postsWrap.appendChild(card);
     });
