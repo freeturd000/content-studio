@@ -108,27 +108,8 @@ let state = {
   postTypes: [{id:"Story",name:"Story"},{id:"Slideshow",name:"Slideshow"},{id:"Carousel",name:"Carousel"},{id:"Reel",name:"Reel"}],
   accounts:  [],
   folders: [
-    {id:"sfw",  name:"SFW",          parentId:null, sfwNsfw:"SFW",  driveId:null, locked:true},
-    {id:"nsfw", name:"NSFW",         parentId:null, sfwNsfw:"NSFW", driveId:null, locked:true},
-    {id:"f1",   name:"Selfie",       parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
-    {id:"f1a",  name:"bathroom",     parentId:"f1",   sfwNsfw:"SFW",  driveId:null},
-    {id:"f1b",  name:"bedroom",      parentId:"f1",   sfwNsfw:"SFW",  driveId:null},
-    {id:"f1c",  name:"car",          parentId:"f1",   sfwNsfw:"SFW",  driveId:null},
-    {id:"f1d",  name:"couch",        parentId:"f1",   sfwNsfw:"SFW",  driveId:null},
-    {id:"f1e",  name:"gym",          parentId:"f1",   sfwNsfw:"SFW",  driveId:null},
-    {id:"f1f",  name:"inside",       parentId:"f1",   sfwNsfw:"SFW",  driveId:null},
-    {id:"f1g",  name:"outside",      parentId:"f1",   sfwNsfw:"SFW",  driveId:null},
-    {id:"f2",   name:"Lifestyle",    parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
-    {id:"f2a",  name:"night",        parentId:"f2",   sfwNsfw:"SFW",  driveId:null},
-    {id:"f2b",  name:"pickleball",   parentId:"f2",   sfwNsfw:"SFW",  driveId:null},
-    {id:"f2c",  name:"restaurant",   parentId:"f2",   sfwNsfw:"SFW",  driveId:null},
-    {id:"f2d",  name:"tennis",       parentId:"f2",   sfwNsfw:"SFW",  driveId:null},
-    {id:"f3",   name:"Body",         parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
-    {id:"f4",   name:"Location",     parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
-    {id:"f5",   name:"Seasonal",     parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
-    {id:"f6",   name:"Filler",       parentId:"sfw",  sfwNsfw:"SFW",  driveId:null},
-    {id:"f6a",  name:"pickleball",   parentId:"f6",   sfwNsfw:"SFW",  driveId:null},
-    // TikTok Quotes and Carousels removed - not part of content library
+    {id:"sfw",  name:"SFW",  parentId:null, sfwNsfw:"SFW",  driveId:null, locked:true},
+    {id:"nsfw", name:"NSFW", parentId:null, sfwNsfw:"NSFW", driveId:null, locked:true},
   ],
   content: [],
   drafts:  [],
@@ -166,27 +147,32 @@ let state = {
 const thumbCache = {};
 function setThumbSrc(img, driveId) {
   if (!driveId) return;
-  // If cached, use immediately
   if (thumbCache[driveId]) { img.src = thumbCache[driveId]; return; }
-  // If authenticated, fetch via API with bearer token - works on all devices
-  if (isAuthenticated()) {
-    fetch("https://www.googleapis.com/drive/v3/files/"+driveId+"?alt=media&fields=id", {
-      headers: {Authorization: "Bearer "+state.token}
-    })
-    .then(r => r.blob())
-    .then(blob => {
-      const url = URL.createObjectURL(blob);
-      thumbCache[driveId] = url;
-      img.src = url;
-    })
-    .catch(() => {
-      img.src = "https://drive.google.com/thumbnail?id="+driveId+"&sz=w400";
-      img.onerror = ()=>{ img.style.display="none"; };
-    });
-  } else {
+  if (!isAuthenticated()) {
     img.src = "https://drive.google.com/thumbnail?id="+driveId+"&sz=w400";
     img.onerror = ()=>{ img.style.display="none"; };
+    return;
   }
+  // Get thumbnail link from Drive API (not the file itself - much faster)
+  fetch("https://www.googleapis.com/drive/v3/files/"+driveId+"?fields=thumbnailLink,id", {
+    headers: {Authorization: "Bearer "+state.token}
+  })
+  .then(r=>r.json())
+  .then(data=>{
+    if (data.thumbnailLink) {
+      // Replace size in thumbnail URL
+      const url = data.thumbnailLink.replace(/=s\d+$/, "=s400");
+      thumbCache[driveId] = url;
+      img.src = url;
+    } else {
+      img.src = "https://drive.google.com/thumbnail?id="+driveId+"&sz=w400";
+    }
+    img.onerror = ()=>{ img.style.display="none"; };
+  })
+  .catch(()=>{
+    img.src = "https://drive.google.com/thumbnail?id="+driveId+"&sz=w400";
+    img.onerror = ()=>{ img.style.display="none"; };
+  });
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
