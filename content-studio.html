@@ -206,9 +206,10 @@ function folderPath(folderId, folders) {
 }
 
 function autoName(platform, accountId, type, date, order) {
+  if (!accountId || !state.accounts.length) return ""; // return empty if not ready
   const acc = state.accounts.find(a=>a.id===accountId);
-  // "IG Main" -> "IG-Main", "TikTok 1" -> "TikTok-1"
-  const accLabel = acc ? acc.sub.replace(/\s+/g,"-") : "Unknown";
+  if (!acc) return ""; // return empty if account not found yet
+  const accLabel = acc.sub.replace(/\s+/g,"-");
   const platCode = platform === "Instagram" ? "IG" : "TT";
   const d = date ? date.slice(0,10).replace(/-/g,"") : "00000000";
   return platCode+"_"+accLabel+"_"+type+"_"+String(order).padStart(3,"0")+"_"+d;
@@ -377,6 +378,8 @@ async function loadFromSheets() {
     state.draftPickerSearch = _ps;
     state.draftPickerFolder = _pf;
     state.draftPickerSfw    = _pw;
+    // Trigger post name update now that accounts are loaded
+    if (!state.draftNameOverridden && state.tab==="draft") updateDraftName();
     render();
   } catch(e) {
     state.syncing=false; state.syncError=e.message;
@@ -1168,13 +1171,12 @@ function renderLibrary() {
       const thumbColors = {f:"#fce7f3",s:"#eff6ff",c:"#f0fdf4"};
       const thumbLabels = {f:"Photo",s:"Slide",c:"Carousel"};
       thumb.style.background = thumbColors[c.icon]||"#f3f4f6";
-      if (c.thumbnailUrl) {
+      if (c.driveId) {
         const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover",position:"absolute",top:0,left:0}});
-        img.onerror = ()=>{ img.style.display="none"; };
         setThumbSrc(img, c.driveId);
         thumb.appendChild(img);
       } else {
-        thumb.appendChild(txt(thumbLabels[c.icon]||"File"));
+        thumb.appendChild(txt("Photo"));
       }
       card.appendChild(thumb);
       const cardPath = folderPath(c.folderId, state.folders);
@@ -1683,10 +1685,21 @@ function renderDraft() {
       id:state.editingDraft?.id||"d"+Date.now(), name:f.name||autoName(f.platform,f.accountId,f.type,f.scheduledAt,1),
       accountId:f.accountId, platform:f.platform, type:f.type,
       contentIds:[...f.contentIds], overlays:f.contentIds.map(id=>f.overlays[id]||""),
-      caption:f.caption, hashtags:f.hashtags, scheduledAt:f.scheduledAt, status:f.status, postOrder:1
+      caption:f.caption, hashtags:f.hashtags, scheduledAt:f.scheduledAt, status:f.status, postOrder:1,
+      metrics: state.editingDraft?.metrics||{views:0,likes:0,comments:0}
     };
     const newDrafts = isEdit ? state.drafts.map(d=>d.id===draft.id?draft:d) : [...state.drafts,draft];
-    setState({drafts:newDrafts, editingDraft:null, draftForm:{platform:"Instagram",accountId:"ig-main",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"}, draftNameOverridden:false});
+    // If saving as posted, update content.posts
+    let newContent = state.content;
+    if (f.status==="posted") {
+      newContent = state.content.map(c=>{
+        if (!draft.contentIds.includes(c.id)) return c;
+        const alreadyPosted = (c.posts||[]).some(p=>p.accountId===draft.accountId&&p.date===draft.scheduledAt?.slice(0,10));
+        if (alreadyPosted) return c;
+        return {...c, posts:[...(c.posts||[]),{accountId:draft.accountId,date:draft.scheduledAt?.slice(0,10)||"",postName:draft.name||"",views:0,likes:0,comments:0}]};
+      });
+    }
+    setState({drafts:newDrafts, content:newContent, editingDraft:null, draftForm:{platform:"Instagram",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"}, draftNameOverridden:false});
     if (isAuthenticated()) saveToSheets();
   }, {flex:1,justifyContent:"center"});
   const clearBtn = renderBtn(isEdit?"Cancel":"Clear", false, () => {
@@ -1737,10 +1750,11 @@ function renderDraft() {
 
 function updateDraftName() {
   if (state.draftNameOverridden) return;
-  if (!state.accounts.length) return; // wait for accounts to load
+  if (!state.accounts.length || !state.draftForm.accountId) return;
   const f = state.draftForm;
   const order = state.drafts.filter(d=>d.accountId===f.accountId&&d.scheduledAt?.slice(0,10)===f.scheduledAt?.slice(0,10)).length + (state.editingDraft?0:1);
-  state.draftForm.name = autoName(f.platform,f.accountId,f.type,f.scheduledAt,order);
+  const newName = autoName(f.platform,f.accountId,f.type,f.scheduledAt,order);
+  if (newName) state.draftForm.name = newName;
 }
 
 // ── CALENDAR ──────────────────────────────────────────────────────────────────
