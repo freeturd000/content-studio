@@ -163,17 +163,29 @@ let state = {
 };
 
 // ── THUMBNAIL HELPER ─────────────────────────────────────────────────────────
+const thumbCache = {};
 function setThumbSrc(img, driveId) {
   if (!driveId) return;
-  const url = "https://drive.google.com/thumbnail?id="+driveId+"&sz=w400";
+  // If cached, use immediately
+  if (thumbCache[driveId]) { img.src = thumbCache[driveId]; return; }
+  // If authenticated, fetch via API with bearer token - works on all devices
   if (isAuthenticated()) {
-    // Fetch with auth header to get around session requirements
-    fetch(url, {headers:{Authorization:"Bearer "+state.token}})
-      .then(r => r.blob())
-      .then(blob => { img.src = URL.createObjectURL(blob); })
-      .catch(() => { img.src = url; }); // fallback to direct
+    fetch("https://www.googleapis.com/drive/v3/files/"+driveId+"?alt=media&fields=id", {
+      headers: {Authorization: "Bearer "+state.token}
+    })
+    .then(r => r.blob())
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      thumbCache[driveId] = url;
+      img.src = url;
+    })
+    .catch(() => {
+      img.src = "https://drive.google.com/thumbnail?id="+driveId+"&sz=w400";
+      img.onerror = ()=>{ img.style.display="none"; };
+    });
   } else {
-    img.src = url;
+    img.src = "https://drive.google.com/thumbnail?id="+driveId+"&sz=w400";
+    img.onerror = ()=>{ img.style.display="none"; };
   }
 }
 
@@ -359,6 +371,7 @@ async function loadFromSheets() {
       contentIds: r[5] ? r[5].split("|") : [],
       overlays:   r[6] ? r[6].split("|") : [],
       caption:r[7]||"", hashtags:r[8]||"", scheduledAt:r[9]||"", status:r[10]||"draft", postOrder:parseInt(r[11])||1,
+      metrics: {views:parseInt(r[12])||0, likes:parseInt(r[13])||0, comments:parseInt(r[14])||0},
     }));
 
     state.models=models; state.platforms=platforms; state.postTypes=postTypes;
@@ -408,8 +421,9 @@ async function saveToSheets() {
     await sheetsClear("Drafts!A2:L");
     if (state.drafts.length) await sheetsSet("Drafts!A2", state.drafts.map(d=>[
       d.id, d.name, d.accountId, d.platform, d.type,
-      d.contentIds.join("|"), d.overlays.join("|"),
-      d.caption, d.hashtags, d.scheduledAt, d.status, d.postOrder
+      (d.contentIds||[]).join("|"), (Array.isArray(d.overlays)?d.overlays:[]).join("|"),
+      d.caption, d.hashtags, d.scheduledAt, d.status, d.postOrder,
+      d.metrics?.views||0, d.metrics?.likes||0, d.metrics?.comments||0
     ]));
 
     setState({syncing:false, lastSynced: new Date().toLocaleTimeString()});
@@ -1208,7 +1222,7 @@ function renderLibrary() {
     }
     panelBody.appendChild(thumbP);
     panelBody.appendChild(el("div", {style:{fontSize:"13px",fontWeight:500,marginBottom:"3px"}}, sel.label));
-    panelBody.appendChild(el("div", {style:{fontSize:"11px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"10px"}}, folderPath(sel.folderId,state.folders)+(sel.sfwNsfw?" - "+sel.sfwNsfw:"")));
+    panelBody.appendChild(el("div", {style:{fontSize:"11px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"10px"}}, folderPath(sel.folderId,state.folders)));
 
     if (sel.driveUrl) {
       const driveLink = el("a", {style:{fontSize:"11px",color:"#3b82f6",display:"block",marginBottom:"10px",wordBreak:"break-all"}}, "View in Drive");
@@ -1869,7 +1883,13 @@ function renderCalendar() {
     if (d.caption) { modal.appendChild(el("div",{class:"section-title",style:{marginTop:"12px"}},"CAPTION")); modal.appendChild(el("div",{style:{fontSize:"12px",color:"#374151",lineHeight:1.4,marginBottom:"6px"}},d.caption)); }
     if (d.hashtags) modal.appendChild(el("div",{style:{fontSize:"11px",color:"#3b82f6",fontFamily:"monospace",marginBottom:"12px"}},d.hashtags));
 
-    const mBtns = div("",{display:"flex",gap:"8px",marginTop:"16px"});
+    const mBtns = div("",{display:"flex",gap:"8px",marginTop:"16px",flexWrap:"wrap"});
+    const delDraftBtn = renderBtn("Delete", false, ()=>{
+      if (!confirm("Delete this post?")) return;
+      setState({drafts:state.drafts.filter(x=>x.id!==d.id),showDraftModal:null});
+      if (isAuthenticated()) saveToSheets();
+    }, {color:"#ef4444",borderColor:"#fecaca",fontSize:"11px"});
+    mBtns.appendChild(delDraftBtn);
     const editBtn = renderBtn("Edit Draft", false, () => {
       const overlaysObj = {};
       (d.contentIds||[]).forEach((id,i)=>{ overlaysObj[id]=d.overlays[i]||""; });
@@ -1893,31 +1913,48 @@ function renderMetrics() {
   const wrap = div("",{height:"100%",display:"flex",flexDirection:"column",overflow:"hidden"});
   const mf = state.metricsFilters;
 
-  const allPosts = state.content.flatMap(c =>
-    c.posts.filter(p => {
-      const acc = state.accounts.find(a=>a.id===p.accountId);
-      return (mf.accounts.length===0||mf.accounts.includes(p.accountId)) &&
-             (mf.types.length===0||mf.types.includes(c.type)) &&
-             (mf.platforms.length===0||mf.platforms.includes(acc?.platform));
-    }).map(p=>({...p, content:c, acc:state.accounts.find(a=>a.id===p.accountId)}))
-  );
+  // Metrics shows posted drafts
+  const postedDrafts = state.drafts.filter(d => {
+    const acc = state.accounts.find(a=>a.id===d.accountId);
+    const st = getStatus(d);
+    return st==="posted" &&
+           (mf.accounts.length===0||mf.accounts.includes(d.accountId)) &&
+           (mf.types.length===0||mf.types.includes(d.type)) &&
+           (mf.platforms.length===0||mf.platforms.includes(d.platform));
+  });
+
+  const allPosts = postedDrafts.map(d => {
+    const acc = state.accounts.find(a=>a.id===d.accountId);
+    const con = (d.contentIds||[]).map(id=>state.content.find(c=>c.id===id)).filter(Boolean);
+    return {
+      id: d.id,
+      accountId: d.accountId,
+      date: d.scheduledAt?.slice(0,10)||"",
+      views: d.metrics?.views||0,
+      likes: d.metrics?.likes||0,
+      comments: d.metrics?.comments||0,
+      acc,
+      content: con[0]||{label:d.name,driveId:null},
+      draft: d,
+      type: d.type,
+    };
+  });
 
   const sorted = [...allPosts].sort((a,b)=>{
     let av,bv;
-    if(state.metricsSortBy==="date"){av=new Date(a.date);bv=new Date(b.date);}
-    else if(state.metricsSortBy==="views"){av=a.views;bv=b.views;}
-    else if(state.metricsSortBy==="likes"){av=a.likes;bv=b.likes;}
-    else if(state.metricsSortBy==="comments"){av=a.comments;bv=b.comments;}
+    if(state.metricsSortBy==="date"){av=new Date(a.date||0);bv=new Date(b.date||0);}
+    else if(state.metricsSortBy==="views"){av=a.views||0;bv=b.views||0;}
+    else if(state.metricsSortBy==="likes"){av=a.likes||0;bv=b.likes||0;}
+    else if(state.metricsSortBy==="comments"){av=a.comments||0;bv=b.comments||0;}
     else{av=(a.likes+a.comments)/(a.acc?.followers||1);bv=(b.likes+b.comments)/(b.acc?.followers||1);}
     return state.metricsSortDir==="desc"?bv-av:av-bv;
   });
 
-  const selAccs = mf.accounts.length ? mf.accounts : state.accounts.map(a=>a.id);
-  const totF = selAccs.reduce((s,id)=>s+(state.accounts.find(a=>a.id===id)?.followers||0),0);
-  const totV = allPosts.reduce((s,p)=>s+p.views,0);
-  const totL = allPosts.reduce((s,p)=>s+p.likes,0);
-  const totC = allPosts.reduce((s,p)=>s+p.comments,0);
-  const avgER = allPosts.length ? ((totL+totC)/(totF*allPosts.length)*100).toFixed(1)+"%" : "--";
+  const totV = allPosts.reduce((s,p)=>s+(p.views||0),0);
+  const totL = allPosts.reduce((s,p)=>s+(p.likes||0),0);
+  const totC = allPosts.reduce((s,p)=>s+(p.comments||0),0);
+  const totPosts = allPosts.length;
+  const avgER = totPosts ? ((totL+totC)/totPosts).toFixed(1) : "--";
 
   // Toolbar
   const toolbar = div("",{padding:"10px 16px",background:"#fff",borderBottom:"1px solid #f0f0f0",display:"flex",alignItems:"center",gap:"8px",flexShrink:0,flexWrap:"wrap"});
@@ -1939,7 +1976,7 @@ function renderMetrics() {
 
   // Stats
   const statsRow = div("",{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"10px",marginBottom:"14px"});
-  [["Followers",totF.toLocaleString()],["Views",fmt(totV)],["Likes",fmt(totL)],["Comments",fmt(totC)],["Avg ER",avgER]].forEach(([l,v])=>{
+  [["Posted",totPosts],["Views",fmt(totV)],["Likes",fmt(totL)],["Comments",fmt(totC)],["Avg ER",avgER]].forEach(([l,v])=>{
     const card = div("card",{padding:"10px 12px"});
     card.appendChild(el("div",{style:{fontSize:"20px",fontWeight:600,fontFamily:"monospace"}},v));
     card.appendChild(el("div",{style:{fontSize:"11px",color:"#9ca3af",marginTop:"2px"}},l));
@@ -1947,26 +1984,7 @@ function renderMetrics() {
   });
   area.appendChild(statsRow);
 
-  // Follower counts
-  const followerCard = div("card",{marginBottom:"14px"});
-  followerCard.appendChild(el("div",{class:"section-title"},"FOLLOWER COUNTS"));
-  const followerRow = div("",{display:"flex",gap:"8px",flexWrap:"wrap"});
-  selAccs.forEach(id=>{
-    const acc = state.accounts.find(a=>a.id===id);
-    if (!acc) return;
-    const row = div("",{display:"flex",alignItems:"center",gap:"7px",padding:"6px 12px",background:"#f9f9f9",borderRadius:"8px",flex:1,minWidth:"120px"});
-    row.appendChild(renderDot(acc.color));
-    const info = div("",{flex:1});
-    info.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500}},acc.sub));
-    info.appendChild(el("div",{style:{fontSize:"12px",fontFamily:"monospace"}},acc.followers.toLocaleString()));
-    row.appendChild(info);
-    const editBtn = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"11px",color:"#9ca3af"}},"edit");
-    editBtn.addEventListener("click",()=>setState({showMetricsUpdate:{accountId:id,content:{id:"dummy"},views:0,likes:0,comments:0}}));
-    row.appendChild(editBtn);
-    followerRow.appendChild(row);
-  });
-  followerCard.appendChild(followerRow);
-  area.appendChild(followerCard);
+  // No follower counts section - metrics are per-post
 
   // Posts grid
   if (!sorted.length) {
@@ -1974,14 +1992,18 @@ function renderMetrics() {
   } else {
     const grid = div("",{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:"10px"});
     sorted.forEach(p=>{
-      const er = pct(p.likes+p.comments,p.acc?.followers);
-      const rr = pct(p.views,p.acc?.followers);
-      const card = div("card",{});
-      const thumb = div("",{width:"100%",aspectRatio:"4/3",borderRadius:"8px",background:"#f8f8f7",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"11px",color:"#9ca3af",marginBottom:"8px"});
-      thumb.appendChild(txt(p.content.type));
+      const er = p.likes+p.comments > 0 ? ((p.likes+p.comments)/Math.max(1,p.views)*100).toFixed(1)+"%" : "--";
+      const card = div("card",{cursor:"pointer"});
+      // Thumbnail
+      const thumb = div("",{width:"100%",aspectRatio:"4/3",borderRadius:"8px",background:"#f8f8f7",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"11px",color:"#9ca3af",marginBottom:"8px",overflow:"hidden",position:"relative"});
+      if (p.content?.driveId) {
+        const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover",position:"absolute",top:0,left:0}});
+        setThumbSrc(img, p.content.driveId);
+        thumb.appendChild(img);
+      } else { thumb.appendChild(txt(p.type||"")); }
       card.appendChild(thumb);
-      card.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"3px"}},p.content.type+" - "+p.date));
-      card.appendChild(el("div",{style:{fontSize:"12px",fontWeight:500,lineHeight:1.3,marginBottom:"7px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}},p.content.label));
+      card.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"3px"}},p.type+" - "+p.date));
+      card.appendChild(el("div",{style:{fontSize:"12px",fontWeight:500,lineHeight:1.3,marginBottom:"7px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}},p.draft?.name||p.content?.label||""));
       const accRow = div("",{display:"flex",alignItems:"center",gap:"5px",marginBottom:"8px"});
       accRow.appendChild(renderDot(p.acc?.color));
       accRow.appendChild(el("span",{style:{fontSize:"10px",color:"#6b7280"}},p.acc?.sub||""));
@@ -1998,13 +2020,9 @@ function renderMetrics() {
       const erDiv = div("",{flex:1,background:"#f0fdf4",borderRadius:"6px",padding:"4px 6px",textAlign:"center"});
       erDiv.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500,color:"#15803d",fontFamily:"monospace"}},er));
       erDiv.appendChild(el("div",{style:{fontSize:"9px",color:"#15803d"}},"eng rate"));
-      const rrDiv = div("",{flex:1,background:"#eff6ff",borderRadius:"6px",padding:"4px 6px",textAlign:"center"});
-      rrDiv.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500,color:"#1d4ed8",fontFamily:"monospace"}},rr));
-      rrDiv.appendChild(el("div",{style:{fontSize:"9px",color:"#1d4ed8"}},"reach rate"));
       rates.appendChild(erDiv);
-      rates.appendChild(rrDiv);
       card.appendChild(rates);
-      const updBtn = renderBtn("Update metrics", false, ()=>setState({showMetricsUpdate:p}), {width:"100%",justifyContent:"center",fontSize:"11px"});
+      const updBtn = renderBtn("Update metrics", false, ()=>setState({showMetricsUpdate:{...p, id:p.id}}), {width:"100%",justifyContent:"center",fontSize:"11px"});
       card.appendChild(updBtn);
       grid.appendChild(card);
     });
@@ -2025,8 +2043,7 @@ function renderMetrics() {
     modal.appendChild(mHeader);
 
     const fields = {};
-    const acc = state.accounts.find(a=>a.id===p.accountId);
-    [{l:"VIEWS",k:"views",v:p.views||0},{l:"LIKES",k:"likes",v:p.likes||0},{l:"COMMENTS",k:"comments",v:p.comments||0},{l:"FOLLOWERS",k:"followers",v:acc?.followers||0}].forEach(f=>{
+    [{l:"VIEWS",k:"views",v:p.views||0},{l:"LIKES",k:"likes",v:p.likes||0},{l:"COMMENTS",k:"comments",v:p.comments||0}].forEach(f=>{
       const row = div("",{marginBottom:"10px"});
       row.appendChild(el("span",{class:"lbl"},f.l));
       const inp = el("input",{type:"number",class:"inp",value:f.v});
@@ -2039,14 +2056,10 @@ function renderMetrics() {
       const views    = parseInt(fields.views.value)||0;
       const likes    = parseInt(fields.likes.value)||0;
       const comments = parseInt(fields.comments.value)||0;
-      const followers= parseInt(fields.followers.value)||0;
-      if (p.content.id !== "dummy") {
-        setState({content:state.content.map(c=>{
-          if(c.id!==p.content.id) return c;
-          return {...c,posts:c.posts.map(pp=>pp.accountId===p.accountId?{...pp,views,likes,comments}:pp)};
-        }), accounts:state.accounts.map(a=>a.id===p.accountId?{...a,followers}:a), showMetricsUpdate:null});
+      if (p.id) {
+        setState({drafts:state.drafts.map(d=>d.id===p.id?{...d,metrics:{views,likes,comments}}:d), showMetricsUpdate:null});
       } else {
-        setState({accounts:state.accounts.map(a=>a.id===p.accountId?{...a,followers}:a), showMetricsUpdate:null});
+        setState({showMetricsUpdate:null});
       }
       if (isAuthenticated()) saveToSheets();
     }, {width:"100%",justifyContent:"center",marginTop:"6px"});
