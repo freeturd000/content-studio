@@ -2341,7 +2341,7 @@ function openMetricsLightbox(contentItems, startIdx, draft) {
   const overlay = div("overlay",{zIndex:2000,background:"rgba(0,0,0,0.88)"});
   document.body.appendChild(overlay);
 
-  const box = div("",{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:2001,background:"#1c1c1e",borderRadius:"14px",padding:"20px",maxWidth:"860px",width:"92vw",height:"88vh",display:"flex",flexDirection:"column",boxShadow:"0 24px 60px rgba(0,0,0,0.7)"});
+  const box = div("",{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:2001,background:"#1c1c1e",borderRadius:"14px",padding:"20px",width:"min(92vw,680px)",height:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 24px 60px rgba(0,0,0,0.7)"});
   box.addEventListener("click",e=>e.stopPropagation());
   document.body.appendChild(box);
 
