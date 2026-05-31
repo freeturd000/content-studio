@@ -130,7 +130,10 @@ const CLIENT_ID = "513513180742-ktqjuav3ojgu8kqchmhg0su0mrkkcpev.apps.googleuser
 const SPREADSHEET_ID = "1jv8krJrNq3rQN4vg_Km1kcQgQELZjZRWFangxjJrRdw";
 const MODELS_FOLDER_ID = "1LfhDyr7n3CVE5zIIbOy4utX0LMjw8odk";
 const CONTENT_STUDIO_FOLDER_ID = "1iMfJnbw6CUng0LUDlNfetStkvwg2BNTa";
-const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive";
+const SWIPE_FOLDER_ID          = "1A2sc7hPac2qgvLDPpcqRbb_PsZvx6P_I";
+const SWIPE_ACCOUNTS_FOLDER_ID = "19wqV5rGn9DflHQinVHV3XKISOkzbJsB8";
+const SWIPE_POSTS_FOLDER_ID    = "1ndgqfJzalU-HcWAbTasfPE_1XdBR6YPS";
+const SCOPES ="https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive";
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let state = {
@@ -189,6 +192,16 @@ let state = {
   showDraftModal: null,
   showMetricsUpdate: null,
   showMetricsDetail: null,
+  swipeAccounts: [],
+  swipeInspo: [],
+  swipeSection: "accounts",
+  swipeAccountDetail: null,
+  swipeInspoDetail: null,
+  swipeShowNewAccount: false,
+  swipeShowNewInspo: false,
+  swipeFilters: {platform:"all", postType:"all", search:""},
+  swipeSortBy: "lastUpdated",
+  swipeSortDir: "desc",
   showUpload: false,
   editingDraft: null,
   fetchingThumbnails: false,
@@ -201,6 +214,11 @@ let state = {
 
 // ── THUMBNAIL HELPER ─────────────────────────────────────────────────────────
 const thumbCache = {};
+function setThumbCache(driveId, url) {
+  const old = thumbCache[driveId];
+  if (old && old.startsWith("blob:")) URL.revokeObjectURL(old);
+  setThumbCache(driveId, url);
+}
 function setThumbSrc(img, driveId) {
   if (!driveId) return;
   // Always use authenticated fetch - most reliable across all devices/sessions
@@ -218,7 +236,7 @@ function setThumbSrc(img, driveId) {
   .then(data=>{
     if (data.thumbnailLink) {
       const url = data.thumbnailLink.replace(/=s\d+$/,"=s400");
-      thumbCache[driveId] = url;
+      setThumbCache(driveId, url);
       if (img.isConnected) img.src = url;
     } else {
       // Drive hasn't generated thumbnail yet (common for fresh uploads) — use public embed URL
@@ -233,7 +251,7 @@ function setThumbSrc(img, driveId) {
           .then(r=>r.blob())
           .then(blob=>{
             const url = URL.createObjectURL(blob);
-            thumbCache[driveId] = url;
+            setThumbCache(driveId, url);
             if (img.isConnected) { img.onerror=null; img.src = url; }
           })
           .catch(()=>{ if(img.isConnected) img.style.display="none"; });
@@ -259,13 +277,11 @@ function getStatus(d) {
 }
 function isPast(s) { return new Date(s) < NOW; }
 
-function folderPath(folderId, folders) {
+function folderPath(folderId) {
+  if (_folderPathCache && folderId in _folderPathCache) return _folderPathCache[folderId];
   const parts = [];
-  let cur = folders.find(x => x.id === folderId);
-  while (cur) {
-    parts.unshift(cur.name);
-    cur = cur.parentId ? folders.find(x => x.id === cur.parentId) : null;
-  }
+  let cur = state.folders.find(x => x.id === folderId);
+  while (cur) { parts.unshift(cur.name); cur = cur.parentId ? state.folders.find(x => x.id === cur.parentId) : null; }
   return parts.join(" > ");
 }
 
@@ -401,12 +417,14 @@ async function loadFromSheets() {
       ensureSheet("Models"), ensureSheet("Accounts"), ensureSheet("Platforms"),
       ensureSheet("PostTypes"), ensureSheet("Folders"), ensureSheet("Content"),
       ensureSheet("Drafts"), ensureSheet("Posts"),
+      ensureSheet("SwipeAccounts"), ensureSheet("SwipeInspo"),
     ]);
 
-    const [modelsData, accountsData, platformsData, postTypesData, foldersData, contentData, draftsData, postsData] = await Promise.all([
+    const [modelsData, accountsData, platformsData, postTypesData, foldersData, contentData, draftsData, postsData, swipeAccountsData, swipeInspoData] = await Promise.all([
       sheetsGet("Models!A2:C"), sheetsGet("Accounts!A2:J"), sheetsGet("Platforms!A2:C"),
       sheetsGet("PostTypes!A2:B"), sheetsGet("Folders!A2:D"), sheetsGet("Content!A2:K"),
       sheetsGet("Drafts!A2:P"), sheetsGet("Posts!A2:H"),
+      sheetsGet("SwipeAccounts!A2:M"), sheetsGet("SwipeInspo!A2:M"),
     ]);
 
     const models = modelsData.length ? modelsData.map(r => ({id:r[0],label:r[1]})) : state.models;
@@ -440,8 +458,25 @@ async function loadFromSheets() {
       lastMetricsUpdated: r[15]||null,
     }));
 
+    const swipeAccounts = (swipeAccountsData||[]).map(r => ({
+      id:r[0], platform:r[1]||"", handle:r[2]||"", profileLink:r[3]||"",
+      followers:parseInt(r[4])||0, posts:parseInt(r[5])||0, following:parseInt(r[6])||0,
+      likes:parseInt(r[7])||0, niche:r[8]||"", whyGood:r[9]||"", notes:r[10]||"",
+      modelIds: r[11] ? r[11].split("|") : ["all"],
+      lastUpdated:r[12]||"",
+    }));
+    const swipeInspo = (swipeInspoData||[]).map(r => ({
+      id:r[0], platform:r[1]||"", account:r[2]||"", postType:r[3]||"",
+      caption:r[4]||"", hashtags:r[5]||"", views:parseInt(r[6])||0,
+      likes:parseInt(r[7])||0, comments:parseInt(r[8])||0, notes:r[9]||"",
+      modelIds: r[10] ? r[10].split("|") : ["all"],
+      driveFileIds: r[11] ? r[11].split("|") : [],
+      lastUpdated:r[12]||"",
+    }));
+
     state.models=models; state.platforms=platforms; state.postTypes=postTypes;
     state.accounts=accounts; state.folders=folders; state.content=content; state.drafts=drafts;
+    state.swipeAccounts=swipeAccounts; state.swipeInspo=swipeInspo;
     state.syncing=false; state.lastSynced=new Date().toLocaleTimeString();
     // Always restore picker state - never overwrite from Sheets
     state.draftPickerSearch = _ps;
@@ -500,6 +535,19 @@ async function saveToSheets() {
       d.caption, d.hashtags, d.scheduledAt, d.status, d.postOrder,
       d.metrics?.views||0, d.metrics?.likes||0, d.metrics?.comments||0,
       d.lastMetricsUpdated||""
+    ]));
+
+    await sheetsClear("SwipeAccounts!A2:M");
+    if (state.swipeAccounts.length) await sheetsSet("SwipeAccounts!A2", state.swipeAccounts.map(a=>[
+      a.id, a.platform, a.handle, a.profileLink, a.followers, a.posts, a.following,
+      a.likes, a.niche, a.whyGood, a.notes, (a.modelIds||["all"]).join("|"), a.lastUpdated||""
+    ]));
+
+    await sheetsClear("SwipeInspo!A2:M");
+    if (state.swipeInspo.length) await sheetsSet("SwipeInspo!A2", state.swipeInspo.map(p=>[
+      p.id, p.platform, p.account, p.postType, p.caption, p.hashtags,
+      p.views||0, p.likes||0, p.comments||0, p.notes,
+      (p.modelIds||["all"]).join("|"), (p.driveFileIds||[]).join("|"), p.lastUpdated||""
     ]));
 
     setState({syncing:false, lastSynced: new Date().toLocaleTimeString()});
@@ -635,9 +683,7 @@ function getFolderSfwNsfw(folderId) {
 
 // ── CONTENT STATUS HELPERS ───────────────────────────────────────────────────
 function getContentStatusForPlatform(contentId, platformName) {
-  const drafts = state.drafts.filter(d =>
-    d.platform === platformName && (d.contentIds||[]).includes(contentId)
-  );
+  const drafts = (_draftsByContentId[contentId] || []).filter(d => d.platform === platformName);
   if (!drafts.length) return null;
   const statuses = drafts.map(d => getStatus(d));
   if (statuses.includes("posted"))    return "posted";
@@ -647,15 +693,13 @@ function getContentStatusForPlatform(contentId, platformName) {
 }
 
 function getContentDraftsForPlatform(contentId, platformName, statusFilter) {
-  return state.drafts.filter(d =>
-    d.platform === platformName &&
-    (d.contentIds||[]).includes(contentId) &&
-    getStatus(d) === statusFilter
+  return (_draftsByContentId[contentId] || []).filter(d =>
+    d.platform === platformName && getStatus(d) === statusFilter
   );
 }
 
 function getOverallContentStatus(contentId) {
-  const drafts = state.drafts.filter(d => (d.contentIds||[]).includes(contentId));
+  const drafts = _draftsByContentId[contentId] || [];
   if (!drafts.length) return "available";
   const statuses = drafts.map(d => getStatus(d));
   if (statuses.includes("posted"))    return "posted";
@@ -875,7 +919,7 @@ async function fetchMissingThumbnails() {
         } catch(e) {}
       }
       if (thumbUrl) {
-        thumbCache[c.driveId] = thumbUrl;
+        setThumbCache(c.driveId, thumbUrl);
         newContent = newContent.map(x => x.id===c.id ? {...x, thumbnailUrl:thumbUrl} : x);
         updated++;
       }
@@ -887,7 +931,37 @@ async function fetchMissingThumbnails() {
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
+// ── RENDER-TIME LOOKUP CACHES (rebuilt once per render, used everywhere) ──────
+let _accountMap = {};   // id → account
+let _folderPathCache = {}; // folderId → path string
+let _draftsByContentId = {}; // contentId → drafts[]
+
+function buildRenderCaches() {
+  _accountMap = {};
+  state.accounts.forEach(a => { _accountMap[a.id] = a; });
+
+  _folderPathCache = {};
+  function getFolderPath(folderId) {
+    if (folderId in _folderPathCache) return _folderPathCache[folderId];
+    const parts = [];
+    let cur = state.folders.find(x => x.id === folderId);
+    while (cur) { parts.unshift(cur.name); cur = cur.parentId ? state.folders.find(x => x.id === cur.parentId) : null; }
+    _folderPathCache[folderId] = parts.join(" > ");
+    return _folderPathCache[folderId];
+  }
+  state.folders.forEach(f => getFolderPath(f.id));
+
+  _draftsByContentId = {};
+  state.drafts.forEach(d => {
+    (d.contentIds || []).forEach(cid => {
+      if (!_draftsByContentId[cid]) _draftsByContentId[cid] = [];
+      _draftsByContentId[cid].push(d);
+    });
+  });
+}
+
 function render() {
+  buildRenderCaches();
   const root = document.getElementById("root");
   root.innerHTML = "";
   const isMobile = window.innerWidth <= 768;
@@ -985,8 +1059,15 @@ function renderMultiSelect(label, options, selected, onChange) {
     dropdown.appendChild(lbl);
   });
 
-  btn.addEventListener("click", e => { e.stopPropagation(); dropdown.style.display = dropdown.style.display==="none"?"block":"none"; });
-  document.addEventListener("click", () => { dropdown.style.display="none"; }, {once:false});
+  btn.addEventListener("click", e => {
+    e.stopPropagation();
+    const isOpen = dropdown.style.display !== "none";
+    dropdown.style.display = isOpen ? "none" : "block";
+    if (!isOpen) {
+      const closeHandler = () => { dropdown.style.display = "none"; };
+      document.addEventListener("click", closeHandler, {once:true});
+    }
+  });
 
   wrap.appendChild(btn);
   wrap.appendChild(dropdown);
@@ -1070,6 +1151,7 @@ function renderSidebar() {
     {id:"draft",   label:"Draft Post"},
     {id:"calendar",label:"Calendar"},
     {id:"posts",   label:"Posts"},
+    {id:"swipe",   label:"Swipe & Inspo"},
   ].forEach(t => {
     const btn = el("button", {class:"nav-btn"+(state.tab===t.id?" active":"")}, t.label);
     btn.addEventListener("click", () => setState({tab:t.id}));
@@ -1248,7 +1330,7 @@ function renderLibrary() {
 
   // Toolbar
   const toolbar = el("div",{"data-panel":"toolbar",style:{padding:"10px 16px",background:isDark?"#1c1c1e":"#fff",borderBottom:"1px solid "+(isDark?"#3a3a3c":"#f0f0f0"),display:"flex",alignItems:"center",gap:"8px",flexShrink:0,flexWrap:"wrap"}});
-  const breadcrumb = state.libraryFolder==="all" ? "All Content" : folderPath(state.libraryFolder, state.folders);
+  const breadcrumb = state.libraryFolder==="all" ? "All Content" : folderPath(state.libraryFolder);
   toolbar.appendChild(el("span", {style:{fontSize:"13px",fontWeight:500,color:"#1a1a1a"}}, breadcrumb));
 
   const searchInp = el("input", {class:"inp",placeholder:"Search...",style:{width:"180px",marginLeft:"auto"}});
@@ -1393,7 +1475,7 @@ function renderLibrary() {
         thumb.appendChild(txt("Photo"));
       }
       card.appendChild(thumb);
-      const cardPath = folderPath(c.folderId, state.folders);
+      const cardPath = folderPath(c.folderId);
       if (cardPath) card.appendChild(el("div", {style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"3px"}}, cardPath));
       card.appendChild(el("div", {style:{fontSize:"12px",fontWeight:500,lineHeight:1.3,marginBottom:"8px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}, c.label));
 
@@ -1444,7 +1526,7 @@ function renderLibrary() {
     }
     panelBody.appendChild(thumbP);
     panelBody.appendChild(el("div", {style:{fontSize:"13px",fontWeight:500,marginBottom:"3px"}}, sel.label));
-    panelBody.appendChild(el("div", {style:{fontSize:"11px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"10px"}}, folderPath(sel.folderId,state.folders)));
+    panelBody.appendChild(el("div", {style:{fontSize:"11px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"10px"}}, folderPath(sel.folderId)));
 
     if (sel.driveUrl) {
       const driveLink = el("a", {style:{fontSize:"11px",color:"#3b82f6",display:"block",marginBottom:"10px",wordBreak:"break-all"}}, "View in Drive");
@@ -1455,10 +1537,10 @@ function renderLibrary() {
 
     const actionRow = div("", {display:"flex",gap:"5px",marginBottom:"12px"});
     const moveBtn = renderBtn("Move", false, () => {
-      const opts = state.folders.map(f=>folderPath(f.id,state.folders)).join("\n");
+      const opts = state.folders.map(f=>folderPath(f.id)).join("\n");
       const dest = prompt("Move to folder:\n"+opts);
       if (!dest) return;
-      const target = state.folders.find(f=>folderPath(f.id,state.folders).toLowerCase()===dest.toLowerCase());
+      const target = state.folders.find(f=>folderPath(f.id).toLowerCase()===dest.toLowerCase());
       if (target) { setState({content:state.content.map(c=>c.id===sel.id?{...c,folderId:target.id}:c)}); }
     }, {fontSize:"11px",padding:"4px 10px"});
     const delBtn = el("button", {class:"btn-danger"}, "Delete");
@@ -1558,7 +1640,7 @@ function renderUploadModal() {
   // Folder
   const folderRow = div("",{marginBottom:"10px"});
   folderRow.appendChild(el("span",{class:"lbl"},"FOLDER"));
-  const folderSel = renderSel("", state.folders.map(f=>({value:f.id,label:folderPath(f.id,state.folders)})), v=>{ selectedFolder=v; });
+  const folderSel = renderSel("", state.folders.map(f=>({value:f.id,label:folderPath(f.id)})), v=>{ selectedFolder=v; });
   folderRow.appendChild(folderSel);
   modal.appendChild(folderRow);
 
@@ -1671,7 +1753,7 @@ function renderUploadModal() {
               try {
                 const meta = await fetch("https://www.googleapis.com/drive/v3/files/"+result.driveId+"?fields=thumbnailLink",{headers:{Authorization:"Bearer "+state.token}}).then(r=>r.json());
                 if (meta.thumbnailLink) {
-                  thumbCache[result.driveId] = meta.thumbnailLink;
+                  setThumbCache(result.driveId, meta.thumbnailLink);
                   setState({content:state.content.map(c=>c.id===newContentId?{...c,thumbnailUrl:meta.thumbnailLink}:c)});
                   if (isAuthenticated()) saveToSheets();
                   break;
@@ -1902,7 +1984,7 @@ function renderDraft() {
       row.appendChild(thumb);
       const info = div("",{flex:1,minWidth:0});
       info.appendChild(el("div",{style:{fontSize:"12px",fontWeight:500,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}},c.label));
-      const pathLabel = folderPath(c.folderId,state.folders);
+      const pathLabel = folderPath(c.folderId);
       if (pathLabel) info.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace"}},pathLabel));
       if (isUsed) {
         const warnLabel = usedDrafts.map(d=>d.name||d.scheduledAt?.slice(0,10)).join(", ");
@@ -2079,7 +2161,7 @@ function renderDraft() {
     // Name
     detail.appendChild(el("div",{style:{fontSize:"13px",fontWeight:600,marginBottom:"4px",wordBreak:"break-all"}},focusedC.label));
     // Path
-    const fp = folderPath(focusedC.folderId, state.folders);
+    const fp = folderPath(focusedC.folderId);
     if (fp) detail.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"8px"}},fp));
 
     // SFW/NSFW badge
@@ -2349,7 +2431,7 @@ function openMetricsLightbox(contentItems, startIdx, draft) {
   box.addEventListener("click",e=>e.stopPropagation());
   document.body.appendChild(box);
 
-  function close() { overlay.remove(); box.remove(); }
+  function close() { document.removeEventListener("keydown", onKey); overlay.remove(); box.remove(); }
   overlay.addEventListener("click", close);
 
   // Close button
@@ -2382,7 +2464,6 @@ function openMetricsLightbox(contentItems, startIdx, draft) {
   // Keyboard nav
   function onKey(e) { if(e.key==="ArrowLeft"){cur=(cur-1+contentItems.length)%contentItems.length;show();}else if(e.key==="ArrowRight"){cur=(cur+1)%contentItems.length;show();}else if(e.key==="Escape"){close();} }
   document.addEventListener("keydown", onKey);
-  overlay.addEventListener("click",()=>{ document.removeEventListener("keydown",onKey); close(); });
 
   function show() {
     const c = contentItems[cur];
@@ -2661,6 +2742,490 @@ function renderDashboard() {
   insightBox.appendChild(el("div",{style:{fontSize:"13px",fontWeight:600,marginBottom:"6px",color:"#374151"}},"Insights Coming Soon"));
   insightBox.appendChild(el("div",{style:{fontSize:"12px",color:"#9ca3af",maxWidth:"360px",margin:"0 auto",lineHeight:1.6}},"AI-powered insights and posting recommendations will appear here once enough data has been collected."));
   body.appendChild(insightBox);
+
+  return wrap;
+}
+
+function renderSwipe() {
+  const isAllModels = state.model === "all";
+  const sf = state.swipeFilters;
+
+  // Filter by model
+  function modelFilter(item) {
+    if (isAllModels) return true;
+    return (item.modelIds||["all"]).includes(state.model) || (item.modelIds||["all"]).includes("all");
+  }
+
+  // Filter accounts
+  let filteredAccounts = state.swipeAccounts.filter(modelFilter);
+  if (sf.platform !== "all") filteredAccounts = filteredAccounts.filter(a => a.platform === sf.platform);
+  if (sf.search) filteredAccounts = filteredAccounts.filter(a =>
+    a.handle.toLowerCase().includes(sf.search.toLowerCase()) ||
+    a.niche.toLowerCase().includes(sf.search.toLowerCase()) ||
+    a.notes.toLowerCase().includes(sf.search.toLowerCase())
+  );
+
+  // Filter inspo
+  let filteredInspo = state.swipeInspo.filter(modelFilter);
+  if (sf.platform !== "all") filteredInspo = filteredInspo.filter(p => p.platform === sf.platform);
+  if (sf.postType !== "all") filteredInspo = filteredInspo.filter(p => p.postType === sf.postType);
+  if (sf.search) filteredInspo = filteredInspo.filter(p =>
+    p.account.toLowerCase().includes(sf.search.toLowerCase()) ||
+    p.caption.toLowerCase().includes(sf.search.toLowerCase()) ||
+    p.notes.toLowerCase().includes(sf.search.toLowerCase())
+  );
+
+  // Sort
+  function sortItems(items) {
+    return [...items].sort((a,b) => {
+      let av, bv;
+      if (state.swipeSortBy==="followers")  { av=a.followers||0; bv=b.followers||0; }
+      else if (state.swipeSortBy==="views") { av=a.views||0; bv=b.views||0; }
+      else if (state.swipeSortBy==="likes") { av=a.likes||0; bv=b.likes||0; }
+      else if (state.swipeSortBy==="comments") { av=a.comments||0; bv=b.comments||0; }
+      else { av=new Date(a.lastUpdated||0); bv=new Date(b.lastUpdated||0); }
+      return state.swipeSortDir==="desc" ? bv-av : av-bv;
+    });
+  }
+
+  const wrap = div("", {height:"100%", display:"flex", flexDirection:"column", overflow:"hidden"});
+
+  // ── TOOLBAR ──
+  const toolbar = div("", {padding:"10px 16px", background:"#fff", borderBottom:"1px solid #f0f0f0", display:"flex", alignItems:"center", gap:"8px", flexShrink:0, flexWrap:"wrap"});
+
+  // Section toggle
+  const secWrap = div("", {display:"flex", gap:"4px", background:"#f3f4f6", borderRadius:"8px", padding:"3px"});
+  ["accounts","inspo"].forEach(sec => {
+    const active = state.swipeSection === sec;
+    const lbl = sec === "accounts" ? "Account Following" : "Inspiration Vault";
+    const btn = el("button", {style:{padding:"5px 12px", borderRadius:"6px", border:"none", background:active?"#1c1c1e":"transparent", color:active?"#fff":"#6b7280", fontSize:"11px", cursor:"pointer", fontWeight:active?"600":"400", whiteSpace:"nowrap"}}, lbl);
+    btn.addEventListener("click", () => setState({swipeSection:sec, swipeAccountDetail:null, swipeInspoDetail:null}));
+    secWrap.appendChild(btn);
+  });
+  toolbar.appendChild(secWrap);
+
+  // Search
+  const searchInp = el("input", {class:"inp", placeholder:"Search...", style:{width:"160px", fontSize:"11px"}});
+  searchInp.value = sf.search;
+  searchInp.addEventListener("input", e => { state.swipeFilters = {...sf, search:e.target.value}; render(); });
+  toolbar.appendChild(searchInp);
+
+  // Platform filter
+  const platOpts = [{value:"all",label:"All Platforms"}, ...state.platforms.map(p=>({value:p.name,label:p.name}))];
+  toolbar.appendChild(renderSel(sf.platform, platOpts, v => setState({swipeFilters:{...sf,platform:v}})));
+
+  // Post type filter (inspo only)
+  if (state.swipeSection === "inspo") {
+    const typeOpts = [{value:"all",label:"All Types"}, ...state.postTypes.map(t=>({value:t.id,label:t.name}))];
+    toolbar.appendChild(renderSel(sf.postType, typeOpts, v => setState({swipeFilters:{...sf,postType:v}})));
+  }
+
+  // Sort
+  const sortOpts = state.swipeSection==="accounts"
+    ? [{value:"lastUpdated",label:"Date"},{value:"followers",label:"Followers"}]
+    : [{value:"lastUpdated",label:"Date"},{value:"views",label:"Views"},{value:"likes",label:"Likes"},{value:"comments",label:"Comments"}];
+  toolbar.appendChild(renderSel(state.swipeSortBy, sortOpts, v => setState({swipeSortBy:v})));
+  toolbar.appendChild(renderBtn(state.swipeSortDir==="desc"?"Desc":"Asc", false, ()=>setState({swipeSortDir:state.swipeSortDir==="desc"?"asc":"desc"}), {fontSize:"11px"}));
+
+  // Add button
+  const addLabel = state.swipeSection==="accounts" ? "+ Add Account" : "+ Add Post";
+  toolbar.appendChild(renderBtn(addLabel, true, ()=>setState(state.swipeSection==="accounts" ? {swipeShowNewAccount:true} : {swipeShowNewInspo:true}), {marginLeft:"auto"}));
+  wrap.appendChild(toolbar);
+
+  // ── MAIN LAYOUT ──
+  const mainRow = div("", {display:"flex", flex:1, overflow:"hidden", minHeight:0});
+
+  // Grid area
+  const gridArea = div("content-area", {flex:1, minWidth:0});
+
+  if (state.swipeSection === "accounts") {
+    const sorted = sortItems(filteredAccounts);
+    if (!sorted.length) {
+      gridArea.appendChild(renderEmptyState("No accounts yet", "Add accounts you follow for inspiration.", "", null));
+    } else {
+      const grid = div("", {display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:"10px"});
+      sorted.forEach(a => {
+        const isSelected = state.swipeAccountDetail?.id === a.id;
+        const platColor = state.platforms.find(p=>p.name===a.platform)?.color || "#888";
+        const card = div("card", {cursor:"pointer", border:isSelected?"2px solid #1c1c1e":"2px solid transparent"});
+        card.addEventListener("click", () => setState({swipeAccountDetail: isSelected ? null : a, swipeInspoDetail:null}));
+
+        // Platform badge + handle
+        const hdr = div("", {display:"flex", alignItems:"center", gap:"8px", marginBottom:"8px"});
+        hdr.appendChild(el("span", {style:{fontSize:"10px", padding:"2px 8px", borderRadius:"20px", background:platColor+"22", color:platColor, fontFamily:"monospace", fontWeight:600}}, a.platform||""));
+        hdr.appendChild(el("div", {style:{flex:1, minWidth:0}}, [
+          el("div", {style:{fontSize:"12px", fontWeight:600, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis"}}, a.handle||"—"),
+          a.niche ? el("div", {style:{fontSize:"10px", color:"#9ca3af", fontFamily:"monospace"}}, a.niche) : null,
+        ].filter(Boolean)));
+        card.appendChild(hdr);
+
+        // Stats row
+        const stats = div("", {display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"4px", marginBottom:"8px"});
+        [["Followers",fmt(a.followers)],["Posts",fmt(a.posts)],["Following",fmt(a.following)],["Likes",fmt(a.likes)]].forEach(([l,v])=>{
+          const s = div("", {background:"#f9f9f9", borderRadius:"6px", padding:"4px", textAlign:"center"});
+          s.appendChild(el("div",{style:{fontSize:"9px",color:"#9ca3af"}},l));
+          s.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500,fontFamily:"monospace"}},String(v)));
+          stats.appendChild(s);
+        });
+        card.appendChild(stats);
+
+        if (a.whyGood) card.appendChild(el("div",{style:{fontSize:"11px",color:"#374151",marginBottom:"4px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",lineHeight:1.4}},a.whyGood));
+        if (a.notes)   card.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}},a.notes));
+        if (a.lastUpdated) card.appendChild(el("div",{style:{fontSize:"9px",color:"#9ca3af",fontFamily:"monospace",marginTop:"6px"}},new Date(a.lastUpdated).toLocaleDateString()));
+
+        grid.appendChild(card);
+      });
+      gridArea.appendChild(grid);
+    }
+  } else {
+    // Inspo vault
+    const sorted = sortItems(filteredInspo);
+    if (!sorted.length) {
+      gridArea.appendChild(renderEmptyState("No inspiration posts yet", "Add posts that inspire you.", "", null));
+    } else {
+      const grid = div("", {display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:"10px"});
+      sorted.forEach(p => {
+        const isSelected = state.swipeInspoDetail?.id === p.id;
+        const platColor = state.platforms.find(pl=>pl.name===p.platform)?.color || "#888";
+        const er = (p.views||0) > 0 ? (((p.likes||0)+(p.comments||0))/(p.views||1)*100).toFixed(1)+"%" : "--";
+        const card = div("card", {cursor:"pointer", border:isSelected?"2px solid #1c1c1e":"2px solid transparent"});
+        card.addEventListener("click", () => setState({swipeInspoDetail: isSelected ? null : p, swipeAccountDetail:null}));
+
+        // Thumbnail (first drive file)
+        const thumb = div("", {width:"100%", aspectRatio:"4/3", borderRadius:"8px", background:"#f3f4f6", marginBottom:"8px", overflow:"hidden", position:"relative", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"11px", color:"#9ca3af"});
+        if (p.driveFileIds?.length) {
+          const img = el("img", {style:{width:"100%",height:"100%",objectFit:"cover",position:"absolute",top:0,left:0}});
+          img.onerror = () => { img.style.display="none"; };
+          setThumbSrc(img, p.driveFileIds[0]);
+          thumb.appendChild(img);
+          if (p.driveFileIds.length > 1) {
+            thumb.appendChild(el("span",{style:{position:"absolute",top:"6px",right:"6px",background:"rgba(0,0,0,0.6)",color:"#fff",fontSize:"9px",borderRadius:"4px",padding:"2px 5px",fontFamily:"monospace"}},p.driveFileIds.length+" files"));
+          }
+        } else {
+          thumb.appendChild(txt(p.postType||"Post"));
+        }
+        card.appendChild(thumb);
+
+        // Platform + type
+        const hdr = div("",{display:"flex",alignItems:"center",gap:"6px",marginBottom:"6px"});
+        hdr.appendChild(el("span",{style:{fontSize:"10px",padding:"2px 7px",borderRadius:"20px",background:platColor+"22",color:platColor,fontFamily:"monospace",fontWeight:600}},p.platform||""));
+        hdr.appendChild(el("span",{style:{fontSize:"10px",color:"#9ca3af"}},p.postType||""));
+        if (p.account) hdr.appendChild(el("span",{style:{fontSize:"10px",color:"#6b7280",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",flex:1}},"@"+p.account));
+        card.appendChild(hdr);
+
+        if (p.caption) card.appendChild(el("div",{style:{fontSize:"11px",color:"#374151",marginBottom:"6px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",lineHeight:1.4}},p.caption));
+
+        // Metrics
+        const mRow = div("",{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"4px",marginBottom:"6px"});
+        [["Views",fmt(p.views||0)],["Likes",fmt(p.likes||0)],["Comments",fmt(p.comments||0)]].forEach(([l,v])=>{
+          const m = div("",{background:"#f9f9f9",borderRadius:"6px",padding:"4px",textAlign:"center"});
+          m.appendChild(el("div",{style:{fontSize:"9px",color:"#9ca3af"}},l));
+          m.appendChild(el("div",{style:{fontSize:"10px",fontWeight:500,fontFamily:"monospace"}},String(v)));
+          mRow.appendChild(m);
+        });
+        card.appendChild(mRow);
+        card.appendChild(el("div",{style:{fontSize:"10px",color:"#15803d",fontFamily:"monospace",marginBottom:"4px"}},"ER: "+er));
+        if (p.notes) card.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}},p.notes));
+        if (p.lastUpdated) card.appendChild(el("div",{style:{fontSize:"9px",color:"#9ca3af",fontFamily:"monospace",marginTop:"4px"}},new Date(p.lastUpdated).toLocaleDateString()));
+
+        grid.appendChild(card);
+      });
+      gridArea.appendChild(grid);
+    }
+  }
+  mainRow.appendChild(gridArea);
+
+  // ── ACCOUNT DETAIL PANEL ──
+  if (state.swipeAccountDetail) {
+    const a = state.swipeAccounts.find(x=>x.id===state.swipeAccountDetail.id) || state.swipeAccountDetail;
+    const panel = div("", {width:"300px", flexShrink:0, borderLeft:"1px solid #f0f0f0", overflowY:"auto", padding:"16px", background:"#fafafa"});
+    panel.addEventListener("click", e=>e.stopPropagation());
+    gridArea.addEventListener("click", ()=>setState({swipeAccountDetail:null}));
+
+    // Header
+    const ph = div("",{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"14px"});
+    ph.appendChild(el("span",{style:{fontSize:"10px",fontWeight:500,color:"#6b7280",fontFamily:"monospace",letterSpacing:"0.06em"}},"ACCOUNT DETAIL"));
+    const xBtn = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",color:"#9ca3af",fontSize:"18px",lineHeight:1}},"×");
+    xBtn.addEventListener("click",()=>setState({swipeAccountDetail:null}));
+    ph.appendChild(xBtn);
+    panel.appendChild(ph);
+
+    function swipeAccField(label, key, type="text") {
+      const row = div("",{marginBottom:"10px"});
+      row.appendChild(el("span",{class:"lbl"},label));
+      const inp = type==="textarea"
+        ? el("textarea",{class:"inp",rows:3,style:{resize:"vertical"}})
+        : el("input",{class:"inp",type:type||"text"});
+      inp.value = a[key]||"";
+      inp.addEventListener("change",()=>{
+        const updated = {...a, [key]: type==="number"?parseInt(inp.value)||0:inp.value, lastUpdated:new Date().toISOString()};
+        setState({swipeAccounts:state.swipeAccounts.map(x=>x.id===a.id?updated:x), swipeAccountDetail:updated});
+        if(isAuthenticated()) saveToSheets();
+      });
+      row.appendChild(inp);
+      return row;
+    }
+
+    panel.appendChild(swipeAccField("HANDLE","handle"));
+    panel.appendChild(swipeAccField("PLATFORM","platform"));
+    panel.appendChild(swipeAccField("PROFILE LINK","profileLink","url"));
+    panel.appendChild(swipeAccField("FOLLOWERS","followers","number"));
+    panel.appendChild(swipeAccField("POSTS","posts","number"));
+    panel.appendChild(swipeAccField("FOLLOWING","following","number"));
+    panel.appendChild(swipeAccField("LIKES","likes","number"));
+    panel.appendChild(swipeAccField("NICHE","niche"));
+    panel.appendChild(swipeAccField("WHY THEY'RE GOOD","whyGood","textarea"));
+    panel.appendChild(swipeAccField("NOTES","notes","textarea"));
+
+    // Model assignment
+    const modRow = div("",{marginBottom:"10px"});
+    modRow.appendChild(el("span",{class:"lbl"},"MODELS"));
+    modRow.appendChild(renderMultiSelect("Assign Models", state.models.filter(m=>m.id!=="all").map(m=>({id:m.id,label:m.label})), (a.modelIds||["all"]).filter(x=>x!=="all"), v=>{
+      const ids = v.length ? v : ["all"];
+      const updated = {...a, modelIds:ids, lastUpdated:new Date().toISOString()};
+      setState({swipeAccounts:state.swipeAccounts.map(x=>x.id===a.id?updated:x), swipeAccountDetail:updated});
+      if(isAuthenticated()) saveToSheets();
+    }));
+    panel.appendChild(modRow);
+
+    if (a.profileLink) {
+      const linkBtn = renderBtn("Open Profile ↗", false, ()=>window.open(a.profileLink,"_blank"), {fontSize:"11px",width:"100%",justifyContent:"center",marginTop:"4px"});
+      panel.appendChild(linkBtn);
+    }
+
+    // Delete
+    const delBtn = renderBtn("Delete Account", false, ()=>setState({showConfirm:{message:"Delete this account?",onYes:()=>{
+      setState({swipeAccounts:state.swipeAccounts.filter(x=>x.id!==a.id), swipeAccountDetail:null, showConfirm:null});
+      if(isAuthenticated()) saveToSheets();
+    }}}), {fontSize:"11px",width:"100%",justifyContent:"center",marginTop:"8px",background:"#fee2e2",color:"#b91c1c"});
+    panel.appendChild(delBtn);
+
+    mainRow.appendChild(panel);
+  }
+
+  // ── INSPO DETAIL PANEL ──
+  if (state.swipeInspoDetail) {
+    const p = state.swipeInspo.find(x=>x.id===state.swipeInspoDetail.id) || state.swipeInspoDetail;
+    const panel = div("", {width:"320px", flexShrink:0, borderLeft:"1px solid #f0f0f0", overflowY:"auto", padding:"16px", background:"#fafafa"});
+    panel.addEventListener("click", e=>e.stopPropagation());
+    gridArea.addEventListener("click", ()=>setState({swipeInspoDetail:null}));
+
+    const ph = div("",{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"14px"});
+    ph.appendChild(el("span",{style:{fontSize:"10px",fontWeight:500,color:"#6b7280",fontFamily:"monospace",letterSpacing:"0.06em"}},"INSPO DETAIL"));
+    const xBtn = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",color:"#9ca3af",fontSize:"18px",lineHeight:1}},"×");
+    xBtn.addEventListener("click",()=>setState({swipeInspoDetail:null}));
+    ph.appendChild(xBtn);
+    panel.appendChild(ph);
+
+    // File thumbnails
+    if (p.driveFileIds?.length) {
+      const thumbRow = div("",{display:"flex",gap:"6px",marginBottom:"12px",flexWrap:"wrap"});
+      p.driveFileIds.forEach((fid,i)=>{
+        const tb = div("",{width:"70px",height:"70px",borderRadius:"8px",background:"#e5e7eb",overflow:"hidden",flexShrink:0,position:"relative",cursor:"pointer"});
+        const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover"}});
+        img.onerror=()=>{img.style.display="none";};
+        setThumbSrc(img, fid);
+        tb.appendChild(img);
+        tb.appendChild(el("span",{style:{position:"absolute",bottom:"3px",left:"3px",background:"rgba(0,0,0,0.55)",color:"#fff",fontSize:"9px",borderRadius:"4px",padding:"1px 4px",fontFamily:"monospace"}},""+(i+1)));
+        tb.addEventListener("click",e=>{
+          e.stopPropagation();
+          const items = p.driveFileIds.map((id,idx)=>({driveId:id, label:"File "+(idx+1), type:""}));
+          openMetricsLightbox(items, i, {overlays:[]});
+        });
+        thumbRow.appendChild(tb);
+      });
+      panel.appendChild(thumbRow);
+    }
+
+    function swipeInspoField(label, key, type="text") {
+      const row = div("",{marginBottom:"10px"});
+      row.appendChild(el("span",{class:"lbl"},label));
+      const inp = type==="textarea"
+        ? el("textarea",{class:"inp",rows:3,style:{resize:"vertical"}})
+        : el("input",{class:"inp",type:type||"text"});
+      inp.value = p[key]||"";
+      inp.addEventListener("change",()=>{
+        const updated = {...p, [key]: type==="number"?parseInt(inp.value)||0:inp.value, lastUpdated:new Date().toISOString()};
+        setState({swipeInspo:state.swipeInspo.map(x=>x.id===p.id?updated:x), swipeInspoDetail:updated});
+        if(isAuthenticated()) saveToSheets();
+      });
+      row.appendChild(inp);
+      return row;
+    }
+
+    panel.appendChild(swipeInspoField("PLATFORM","platform"));
+    panel.appendChild(swipeInspoField("ACCOUNT","account"));
+    panel.appendChild(swipeInspoField("POST TYPE","postType"));
+    panel.appendChild(swipeInspoField("CAPTION","caption","textarea"));
+    panel.appendChild(swipeInspoField("HASHTAGS","hashtags","textarea"));
+
+    panel.appendChild(el("span",{class:"lbl"},"METRICS"));
+    const mFields = {};
+    [{l:"VIEWS",k:"views"},{l:"LIKES",k:"likes"},{l:"COMMENTS",k:"comments"}].forEach(f=>{
+      const row = div("",{marginBottom:"8px"});
+      row.appendChild(el("span",{class:"lbl"},f.l));
+      const inp = el("input",{type:"number",class:"inp",value:p[f.k]||0,style:{fontFamily:"monospace"}});
+      inp.addEventListener("change",()=>{
+        const views=parseInt(mFields.views?.value)||0, likes=parseInt(mFields.likes?.value)||0, comments=parseInt(mFields.comments?.value)||0;
+        const updated={...p,views,likes,comments,lastUpdated:new Date().toISOString()};
+        setState({swipeInspo:state.swipeInspo.map(x=>x.id===p.id?updated:x),swipeInspoDetail:updated});
+        if(isAuthenticated()) saveToSheets();
+      });
+      mFields[f.k]=inp;
+      row.appendChild(inp);
+      panel.appendChild(row);
+    });
+
+    panel.appendChild(swipeInspoField("NOTES","notes","textarea"));
+
+    // Model assignment
+    const modRow = div("",{marginBottom:"10px"});
+    modRow.appendChild(el("span",{class:"lbl"},"MODELS"));
+    modRow.appendChild(renderMultiSelect("Assign Models", state.models.filter(m=>m.id!=="all").map(m=>({id:m.id,label:m.label})), (p.modelIds||["all"]).filter(x=>x!=="all"), v=>{
+      const ids = v.length ? v : ["all"];
+      const updated = {...p, modelIds:ids, lastUpdated:new Date().toISOString()};
+      setState({swipeInspo:state.swipeInspo.map(x=>x.id===p.id?updated:x), swipeInspoDetail:updated});
+      if(isAuthenticated()) saveToSheets();
+    }));
+    panel.appendChild(modRow);
+
+    if (p.lastUpdated) panel.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginTop:"4px"}},"Updated: "+new Date(p.lastUpdated).toLocaleString(undefined,{month:"short",day:"numeric",year:"numeric",hour:"2-digit",minute:"2-digit"})));
+
+    // Delete
+    const delBtn = renderBtn("Delete Post", false, ()=>setState({showConfirm:{message:"Delete this inspiration post?",onYes:()=>{
+      setState({swipeInspo:state.swipeInspo.filter(x=>x.id!==p.id), swipeInspoDetail:null, showConfirm:null});
+      if(isAuthenticated()) saveToSheets();
+    }}}), {fontSize:"11px",width:"100%",justifyContent:"center",marginTop:"8px",background:"#fee2e2",color:"#b91c1c"});
+    panel.appendChild(delBtn);
+
+    mainRow.appendChild(panel);
+  }
+
+  wrap.appendChild(mainRow);
+
+  // ── NEW ACCOUNT MODAL ──
+  if (state.swipeShowNewAccount) {
+    const overlay = div("overlay",{});
+    overlay.addEventListener("click",()=>setState({swipeShowNewAccount:false}));
+    const modal = div("modal",{width:"420px",maxHeight:"80vh",overflowY:"auto"});
+    modal.addEventListener("click",e=>e.stopPropagation());
+    const mh = div("",{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px"});
+    mh.appendChild(el("span",{style:{fontSize:"14px",fontWeight:600}},"Add Account"));
+    const mc = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"18px",color:"#9ca3af"}},"×");
+    mc.addEventListener("click",()=>setState({swipeShowNewAccount:false}));
+    mh.appendChild(mc);
+    modal.appendChild(mh);
+
+    const fields = {};
+    [
+      {l:"PLATFORM",k:"platform",type:"select"},
+      {l:"HANDLE",k:"handle"},
+      {l:"PROFILE LINK",k:"profileLink"},
+      {l:"FOLLOWERS",k:"followers",type:"number"},
+      {l:"POSTS",k:"posts",type:"number"},
+      {l:"FOLLOWING",k:"following",type:"number"},
+      {l:"LIKES",k:"likes",type:"number"},
+      {l:"NICHE",k:"niche"},
+      {l:"WHY THEY'RE GOOD",k:"whyGood",type:"textarea"},
+      {l:"NOTES",k:"notes",type:"textarea"},
+    ].forEach(f=>{
+      const row = div("",{marginBottom:"10px"});
+      row.appendChild(el("span",{class:"lbl"},f.l));
+      let inp;
+      if (f.type==="select") {
+        inp = renderSel("", state.platforms.map(p=>({value:p.name,label:p.name})), ()=>{});
+      } else if (f.type==="textarea") {
+        inp = el("textarea",{class:"inp",rows:3});
+      } else {
+        inp = el("input",{class:"inp",type:f.type||"text"});
+      }
+      fields[f.k] = inp;
+      row.appendChild(inp);
+      modal.appendChild(row);
+    });
+
+    const saveBtn = renderBtn("Save Account", true, ()=>{
+      const newAcc = {
+        id:"sw"+Date.now(), platform:fields.platform.value||"", handle:fields.handle.value||"",
+        profileLink:fields.profileLink.value||"", followers:parseInt(fields.followers.value)||0,
+        posts:parseInt(fields.posts.value)||0, following:parseInt(fields.following.value)||0,
+        likes:parseInt(fields.likes.value)||0, niche:fields.niche.value||"",
+        whyGood:fields.whyGood.value||"", notes:fields.notes.value||"",
+        modelIds:["all"], lastUpdated:new Date().toISOString(),
+      };
+      setState({swipeAccounts:[...state.swipeAccounts,newAcc], swipeShowNewAccount:false});
+      if(isAuthenticated()) saveToSheets();
+    },{width:"100%",justifyContent:"center",marginTop:"6px"});
+    modal.appendChild(saveBtn);
+    overlay.appendChild(modal);
+    wrap.appendChild(overlay);
+  }
+
+  // ── NEW INSPO MODAL ──
+  if (state.swipeShowNewInspo) {
+    const overlay = div("overlay",{});
+    overlay.addEventListener("click",()=>setState({swipeShowNewInspo:false}));
+    const modal = div("modal",{width:"460px",maxHeight:"85vh",overflowY:"auto"});
+    modal.addEventListener("click",e=>e.stopPropagation());
+    const mh = div("",{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px"});
+    mh.appendChild(el("span",{style:{fontSize:"14px",fontWeight:600}},"Add Inspiration Post"));
+    const mc = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"18px",color:"#9ca3af"}},"×");
+    mc.addEventListener("click",()=>setState({swipeShowNewInspo:false}));
+    mh.appendChild(mc);
+    modal.appendChild(mh);
+
+    const nf = {};
+    [{l:"PLATFORM",k:"platform",type:"select"},{l:"ACCOUNT",k:"account"},{l:"POST TYPE",k:"postType",type:"typeSelect"},{l:"CAPTION",k:"caption",type:"textarea"},{l:"HASHTAGS",k:"hashtags",type:"textarea"},{l:"VIEWS",k:"views",type:"number"},{l:"LIKES",k:"likes",type:"number"},{l:"COMMENTS",k:"comments",type:"number"},{l:"NOTES",k:"notes",type:"textarea"}].forEach(f=>{
+      const row = div("",{marginBottom:"10px"});
+      row.appendChild(el("span",{class:"lbl"},f.l));
+      let inp;
+      if (f.type==="select") inp = renderSel("", state.platforms.map(p=>({value:p.name,label:p.name})), ()=>{});
+      else if (f.type==="typeSelect") inp = renderSel("", state.postTypes.map(t=>({value:t.id,label:t.name})), ()=>{});
+      else if (f.type==="textarea") inp = el("textarea",{class:"inp",rows:3});
+      else inp = el("input",{class:"inp",type:f.type||"text"});
+      nf[f.k]=inp; row.appendChild(inp); modal.appendChild(row);
+    });
+
+    // File upload
+    modal.appendChild(el("span",{class:"lbl"},"FILES (from Drive or upload)"));
+    let newFileIds = [];
+    const fileStatus = el("div",{style:{fontSize:"11px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"8px"}});
+    const fileInp = el("input",{type:"file",style:{display:"none"},multiple:true});
+    fileInp.accept = "image/*,video/*";
+    fileInp.addEventListener("change", async()=>{
+      const files = [...fileInp.files];
+      if (!files.length) return;
+      fileStatus.textContent = "Uploading "+files.length+" file(s)...";
+      for (const file of files) {
+        try {
+          const result = await driveUploadFile(file, file.name, SWIPE_POSTS_FOLDER_ID);
+          if (result.id) newFileIds.push(result.id);
+        } catch(e) {}
+      }
+      fileStatus.textContent = newFileIds.length+" file(s) ready.";
+    });
+    const uploadFilesBtn = renderBtn("Upload Files", false, ()=>fileInp.click(), {fontSize:"11px"});
+    const fileRow = div("",{display:"flex",gap:"8px",alignItems:"center",marginBottom:"10px"});
+    fileRow.appendChild(uploadFilesBtn);
+    fileRow.appendChild(fileStatus);
+    modal.appendChild(fileRow);
+    modal.appendChild(fileInp);
+
+    const saveBtn = renderBtn("Save Post", true, ()=>{
+      const newPost = {
+        id:"si"+Date.now(), platform:nf.platform.value||"", account:nf.account.value||"",
+        postType:nf.postType.value||"", caption:nf.caption.value||"", hashtags:nf.hashtags.value||"",
+        views:parseInt(nf.views.value)||0, likes:parseInt(nf.likes.value)||0,
+        comments:parseInt(nf.comments.value)||0, notes:nf.notes.value||"",
+        modelIds:["all"], driveFileIds:[...newFileIds], lastUpdated:new Date().toISOString(),
+      };
+      setState({swipeInspo:[...state.swipeInspo,newPost], swipeShowNewInspo:false});
+      if(isAuthenticated()) saveToSheets();
+    },{width:"100%",justifyContent:"center",marginTop:"6px"});
+    modal.appendChild(saveBtn);
+    overlay.appendChild(modal);
+    wrap.appendChild(overlay);
+  }
 
   return wrap;
 }
@@ -3990,7 +4555,7 @@ function renderApp() {
   const hamburger = el("button",{class:"mobile-nav",style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"20px",color:"#1a1a1a",padding:"4px 8px",marginRight:"8px"}},"☰");
   hamburger.addEventListener("click",()=>setState({sidebarOpen:!state.sidebarOpen}));
   topbar.appendChild(hamburger);
-  const tabTitles = {dashboard:"Dashboard",library:"Content Library",draft:"Draft Post",calendar:"Calendar",posts:"Posts"};
+  const tabTitles = {dashboard:"Dashboard",library:"Content Library",draft:"Draft Post",calendar:"Calendar",posts:"Posts",swipe:"Swipe & Inspiration"};
   const titleWrap = div("",{});
   titleWrap.appendChild(el("div",{style:{fontSize:"15px",fontWeight:600,color:"#1a1a1a"}},tabTitles[state.tab]||""));
   titleWrap.appendChild(el("div",{style:{fontSize:"11px",color:"#9ca3af",marginTop:"1px"}},state.models.find(m=>m.id===state.model)?.label||""));
@@ -4011,6 +4576,7 @@ function renderApp() {
   if (state.tab==="draft")    content.appendChild(renderDraft());
   if (state.tab==="calendar") content.appendChild(renderCalendar());
   if (state.tab==="posts")    content.appendChild(renderMetrics());
+  if (state.tab==="swipe")   content.appendChild(renderSwipe());
   main.appendChild(content);
   app.appendChild(main);
 
