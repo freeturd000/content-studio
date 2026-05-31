@@ -186,6 +186,7 @@ let state = {
   showAddModel: false,
   showDraftModal: null,
   showMetricsUpdate: null,
+  showMetricsDetail: null,
   showUpload: false,
   editingDraft: null,
   fetchingThumbnails: false,
@@ -1979,7 +1980,8 @@ function renderDraft() {
       accountId:f.accountId, platform:f.platform, type:f.type,
       contentIds:[...f.contentIds], overlays:f.contentIds.map(id=>f.overlays[id]||""),
       caption:f.caption, hashtags:f.hashtags, scheduledAt:f.scheduledAt, status:f.status, postOrder:1,
-      metrics: state.editingDraft?.metrics||{views:0,likes:0,comments:0}
+      metrics: state.editingDraft?.metrics||{views:0,likes:0,comments:0},
+      lastMetricsUpdated: f.status==="posted" ? (state.editingDraft?.lastMetricsUpdated||new Date().toISOString()) : (state.editingDraft?.lastMetricsUpdated||null)
     };
     const newDrafts = isEdit ? state.drafts.map(d=>d.id===draft.id?draft:d) : [...state.drafts,draft];
     // Update content.posts based on posted status
@@ -2394,7 +2396,10 @@ function renderMetrics() {
   toolbar.appendChild(sortWrap);
   wrap.appendChild(toolbar);
 
-  const area = div("content-area",{});
+  // Posts grid
+  const mainRow = div("",{display:"flex",flex:1,overflow:"hidden",minHeight:0});
+
+  const gridArea = div("",{flex:1,overflowY:"auto",padding:"0 16px 16px"});
 
   // Stats
   const statsRow = div("",{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"10px",marginBottom:"14px"});
@@ -2404,19 +2409,17 @@ function renderMetrics() {
     card.appendChild(el("div",{style:{fontSize:"11px",color:"#9ca3af",marginTop:"2px"}},l));
     statsRow.appendChild(card);
   });
-  area.appendChild(statsRow);
+  gridArea.appendChild(statsRow);
 
-  // No follower counts section - metrics are per-post
-
-  // Posts grid
   if (!sorted.length) {
-    area.appendChild(renderEmptyState("No posts found","Adjust your filters to see posts.","",null));
+    gridArea.appendChild(renderEmptyState("No posts found","Adjust your filters to see posts.","",null));
   } else {
     const grid = div("",{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:"10px"});
     sorted.forEach(p=>{
       const er = p.likes+p.comments > 0 ? ((p.likes+p.comments)/Math.max(1,p.views)*100).toFixed(1)+"%" : "--";
-      const card = div("card",{cursor:"pointer"});
-      // Thumbnail
+      const isSelected = state.showMetricsDetail?.id === p.id;
+      const card = div("card",{cursor:"pointer",border:isSelected?"2px solid #1c1c1e":"2px solid transparent",transition:"border-color 0.1s"});
+      card.addEventListener("click", ()=>setState({showMetricsDetail: isSelected ? null : p}));
       const thumb = div("",{width:"100%",aspectRatio:"4/3",borderRadius:"8px",background:"#f8f8f7",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"11px",color:"#9ca3af",marginBottom:"8px",overflow:"hidden",position:"relative"});
       if (p.content?.driveId) {
         const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover",position:"absolute",top:0,left:0}});
@@ -2426,10 +2429,10 @@ function renderMetrics() {
       card.appendChild(thumb);
       card.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"3px"}},p.type+" - "+p.date));
       card.appendChild(el("div",{style:{fontSize:"12px",fontWeight:500,lineHeight:1.3,marginBottom:"7px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}},p.draft?.name||p.content?.label||""));
-      const accRow = div("",{display:"flex",alignItems:"center",gap:"5px",marginBottom:"8px"});
-      accRow.appendChild(renderDot(p.acc?.color));
-      accRow.appendChild(el("span",{style:{fontSize:"10px",color:"#6b7280"}},p.acc?.sub||""));
-      card.appendChild(accRow);
+      const accRowEl = div("",{display:"flex",alignItems:"center",gap:"5px",marginBottom:"8px"});
+      accRowEl.appendChild(renderDot(p.acc?.color));
+      accRowEl.appendChild(el("span",{style:{fontSize:"10px",color:"#6b7280"}},p.acc?.sub||""));
+      card.appendChild(accRowEl);
       const metricsGrid = div("grid3",{marginBottom:"6px"});
       [["Views",fmt(p.views)],["Likes",fmt(p.likes)],["Cmts",fmt(p.comments)]].forEach(([ic,v])=>{
         const m = div("",{background:"#f9f9f9",borderRadius:"6px",padding:"5px 4px",textAlign:"center"});
@@ -2438,21 +2441,108 @@ function renderMetrics() {
         metricsGrid.appendChild(m);
       });
       card.appendChild(metricsGrid);
-      const rates = div("",{display:"flex",gap:"5px",marginBottom:"8px"});
-      const erDiv = div("",{flex:1,background:"#f0fdf4",borderRadius:"6px",padding:"4px 6px",textAlign:"center"});
+      const erDiv = div("",{background:"#f0fdf4",borderRadius:"6px",padding:"4px 6px",textAlign:"center"});
       erDiv.appendChild(el("div",{style:{fontSize:"11px",fontWeight:500,color:"#15803d",fontFamily:"monospace"}},er));
       erDiv.appendChild(el("div",{style:{fontSize:"9px",color:"#15803d"}},"eng rate"));
-      rates.appendChild(erDiv);
-      card.appendChild(rates);
-      const updBtn = renderBtn("Update metrics", false, ()=>setState({showMetricsUpdate:{...p, id:p.id}}), {width:"100%",justifyContent:"center",fontSize:"11px"});
-      card.appendChild(updBtn);
+      card.appendChild(erDiv);
       grid.appendChild(card);
     });
-    area.appendChild(grid);
+    gridArea.appendChild(grid);
   }
-  wrap.appendChild(area);
+  mainRow.appendChild(gridArea);
 
-  // Update metrics modal
+  // Detail panel
+  if (state.showMetricsDetail) {
+    const p = state.showMetricsDetail;
+    const draft = state.drafts.find(d=>d.id===p.id) || p.draft;
+    const panel = div("",{width:"300px",flexShrink:0,borderLeft:"1px solid #f0f0f0",overflowY:"auto",padding:"16px",background:"#fafafa"});
+
+    // Header
+    const ph = div("",{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"14px"});
+    ph.appendChild(el("span",{style:{fontSize:"10px",fontWeight:500,color:"#6b7280",fontFamily:"monospace",letterSpacing:"0.06em"}},"POST DETAIL"));
+    const closeBtn = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",color:"#9ca3af",fontSize:"18px",lineHeight:1,padding:"0"}},"×");
+    closeBtn.addEventListener("click",()=>setState({showMetricsDetail:null}));
+    ph.appendChild(closeBtn);
+    panel.appendChild(ph);
+
+    // All content thumbnails
+    const contentItems = (draft?.contentIds||[]).map(id=>state.content.find(c=>c.id===id)).filter(Boolean);
+    if (contentItems.length) {
+      const thumbRow = div("",{display:"flex",gap:"6px",marginBottom:"12px",flexWrap:"wrap"});
+      contentItems.forEach((c,i)=>{
+        const tb = div("",{width:"70px",height:"70px",borderRadius:"8px",background:"#e5e7eb",overflow:"hidden",flexShrink:0,position:"relative"});
+        if (c.driveId) {
+          const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover"}});
+          img.onerror=()=>{img.style.display="none";};
+          setThumbSrc(img,c.driveId);
+          tb.appendChild(img);
+        }
+        const numBadge = el("span",{style:{position:"absolute",bottom:"3px",left:"3px",background:"rgba(0,0,0,0.55)",color:"#fff",fontSize:"9px",borderRadius:"4px",padding:"1px 4px",fontFamily:"monospace"}},""+(i+1));
+        tb.appendChild(numBadge);
+        thumbRow.appendChild(tb);
+      });
+      panel.appendChild(thumbRow);
+    }
+
+    // Post name
+    panel.appendChild(el("div",{style:{fontSize:"13px",fontWeight:600,marginBottom:"4px",wordBreak:"break-all"}},draft?.name||p.content?.label||""));
+
+    // Platform / account / type / date
+    const meta = div("",{fontSize:"11px",color:"#6b7280",fontFamily:"monospace",marginBottom:"10px",lineHeight:1.7});
+    meta.appendChild(el("div",{},(draft?.platform||"")+" · "+(p.acc?.sub||p.acc?.handle||"")));
+    meta.appendChild(el("div",{},(draft?.type||"")+" · "+(draft?.scheduledAt?.slice(0,16)||"").replace("T"," ")));
+    const statusColors = {posted:"#15803d",scheduled:"#1d4ed8",missed:"#b91c1c",draft:"#6b7280"};
+    const st = getStatus(draft||{status:p.draft?.status});
+    meta.appendChild(el("span",{style:{display:"inline-block",fontSize:"10px",padding:"2px 8px",borderRadius:"20px",background:st==="posted"?"#d1fae5":st==="scheduled"?"#dbeafe":st==="missed"?"#fee2e2":"#f3f4f6",color:statusColors[st]||"#6b7280",fontFamily:"monospace",marginTop:"2px"}},st));
+    panel.appendChild(meta);
+
+    // Caption & hashtags
+    if (draft?.caption) {
+      panel.appendChild(el("div",{style:{fontSize:"10px",fontWeight:500,color:"#9ca3af",fontFamily:"monospace",marginBottom:"3px",letterSpacing:"0.06em"}},"CAPTION"));
+      panel.appendChild(el("div",{style:{fontSize:"11px",color:"#374151",marginBottom:"10px",lineHeight:1.5,background:"#fff",borderRadius:"6px",padding:"8px 10px",border:"1px solid #e5e7eb"}},draft.caption));
+    }
+    if (draft?.hashtags) {
+      panel.appendChild(el("div",{style:{fontSize:"10px",fontWeight:500,color:"#9ca3af",fontFamily:"monospace",marginBottom:"3px",letterSpacing:"0.06em"}},"HASHTAGS"));
+      panel.appendChild(el("div",{style:{fontSize:"11px",color:"#6366f1",marginBottom:"10px",fontFamily:"monospace",wordBreak:"break-all"}},draft.hashtags));
+    }
+
+    // Editable metrics
+    panel.appendChild(el("div",{style:{fontSize:"10px",fontWeight:500,color:"#9ca3af",fontFamily:"monospace",marginBottom:"8px",letterSpacing:"0.06em"}},"METRICS"));
+    const mFields = {};
+    const currentDraft = state.drafts.find(d=>d.id===p.id);
+    [{l:"VIEWS",k:"views"},{l:"LIKES",k:"likes"},{l:"COMMENTS",k:"comments"}].forEach(f=>{
+      const row = div("",{marginBottom:"8px"});
+      row.appendChild(el("span",{class:"lbl"},f.l));
+      const inp = el("input",{type:"number",class:"inp",value:currentDraft?.metrics?.[f.k]||0,style:{fontFamily:"monospace"}});
+      inp.addEventListener("change",()=>{
+        const views    = parseInt(mFields.views?.value)||0;
+        const likes    = parseInt(mFields.likes?.value)||0;
+        const comments = parseInt(mFields.comments?.value)||0;
+        const ts = new Date().toISOString();
+        setState({
+          drafts: state.drafts.map(d=>d.id===p.id?{...d,metrics:{views,likes,comments},lastMetricsUpdated:ts}:d),
+          showMetricsDetail: {...state.showMetricsDetail, views, likes, comments}
+        });
+        if (isAuthenticated()) saveToSheets();
+      });
+      mFields[f.k] = inp;
+      row.appendChild(inp);
+      panel.appendChild(row);
+    });
+
+    // Last updated
+    const lmu = currentDraft?.lastMetricsUpdated;
+    if (lmu) {
+      const fmtDate = new Date(lmu).toLocaleString(undefined,{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+      panel.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace",marginTop:"8px"}},"Updated: "+fmtDate));
+    }
+
+    mainRow.appendChild(panel);
+  }
+
+  wrap.appendChild(mainRow);
+
+  // Update metrics modal (kept for any legacy callers)
   if (state.showMetricsUpdate) wrap.appendChild(renderMetricsUpdateModal());
 
   return wrap;
@@ -2708,7 +2798,8 @@ function renderMetricsUpdateModal() {
     const likes    = parseInt(fields.likes.value)||0;
     const comments = parseInt(fields.comments.value)||0;
     if (p.id) {
-      setState({drafts:state.drafts.map(d=>d.id===p.id?{...d,metrics:{views,likes,comments}}:d), showMetricsUpdate:null});
+      const ts = new Date().toISOString();
+      setState({drafts:state.drafts.map(d=>d.id===p.id?{...d,metrics:{views,likes,comments},lastMetricsUpdated:ts}:d), showMetricsUpdate:null});
     } else {
       setState({showMetricsUpdate:null});
     }
