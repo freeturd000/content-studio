@@ -2503,7 +2503,7 @@ function renderDashboard() {
     });
     const keys = Object.keys(buckets).sort();
     return {
-      labels: keys.map(k => { const [y,m]=k.split("-"); return (MONTH_NAMES[parseInt(m)-1]||m)+" "+y.slice(2); }),
+      labels: keys.map(k => { const [y,m]=k.split("-"); return (MONTH_NAMES[parseInt(m)-1]||m)+" "+y; }),
       views:    keys.map(k => buckets[k].views),
       likes:    keys.map(k => buckets[k].likes),
       comments: keys.map(k => buckets[k].comments),
