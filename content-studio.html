@@ -2518,15 +2518,17 @@ function renderDashboard() {
   function makeChartCard(title, chartId, type, labels, data, color) {
     const card = div("card", {padding:"14px", overflow:"hidden"});
     card.appendChild(el("div", {style:{fontSize:"11px", fontWeight:500, color:"#6b7280", fontFamily:"monospace", marginBottom:"10px", letterSpacing:"0.06em"}}, title));
-    const canvasWrap = div("", {position:"relative", height:"160px", overflow:"hidden"});
-    const canvas = el("canvas", {id:chartId});
+    const canvasWrap = div("", {position:"relative", width:"100%", height:"160px", overflow:"hidden"});
+    const canvas = el("canvas", {id:chartId, style:{display:"block"}});
+    canvas.height = 160;
     canvasWrap.appendChild(canvas);
     card.appendChild(canvasWrap);
     chartsGrid.appendChild(card);
-    // Defer chart creation until canvas is in DOM
     requestAnimationFrame(() => {
       const existing = Chart.getChart(chartId);
       if (existing) existing.destroy();
+      canvas.width  = canvasWrap.offsetWidth || 300;
+      canvas.height = 160;
       const isDark = state.darkMode;
       const gridColor = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
       const tickColor = isDark ? "#8e8c88" : "#9ca3af";
@@ -2546,7 +2548,7 @@ function renderDashboard() {
           }]
         },
         options: {
-          responsive: true,
+          responsive: false,
           maintainAspectRatio: false,
           plugins: { legend:{display:false} },
           scales: {
