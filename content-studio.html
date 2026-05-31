@@ -2358,8 +2358,8 @@ function openMetricsLightbox(contentItems, startIdx, draft) {
   box.appendChild(counter);
 
   // Image area
-  const imgWrap = div("",{flex:1,minHeight:0,borderRadius:"10px",background:"#2c2c2e",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:"10px",position:"relative"});
-  const imgEl = el("img",{style:{maxWidth:"100%",maxHeight:"100%",objectFit:"contain",display:"block"}});
+  const imgWrap = div("",{flex:1,minHeight:0,borderRadius:"10px",background:"#2c2c2e",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:"10px"});
+  const imgEl = el("img",{style:{width:"100%",height:"100%",objectFit:"contain",display:"block"}});
   imgWrap.appendChild(imgEl);
   box.appendChild(imgWrap);
 
