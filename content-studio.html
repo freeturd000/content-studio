@@ -1151,7 +1151,7 @@ function renderSidebar() {
     {id:"draft",   label:"Draft Post"},
     {id:"calendar",label:"Calendar"},
     {id:"posts",   label:"Posts"},
-    {id:"swipe",   label:"Swipe & Inspo"},
+    {id:"swipe",   label:"Inspiration"},
   ].forEach(t => {
     const btn = el("button", {class:"nav-btn"+(state.tab===t.id?" active":"")}, t.label);
     btn.addEventListener("click", () => setState({tab:t.id}));
@@ -4555,7 +4555,7 @@ function renderApp() {
   const hamburger = el("button",{class:"mobile-nav",style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"20px",color:"#1a1a1a",padding:"4px 8px",marginRight:"8px"}},"☰");
   hamburger.addEventListener("click",()=>setState({sidebarOpen:!state.sidebarOpen}));
   topbar.appendChild(hamburger);
-  const tabTitles = {dashboard:"Dashboard",library:"Content Library",draft:"Draft Post",calendar:"Calendar",posts:"Posts",swipe:"Swipe & Inspiration"};
+  const tabTitles = {dashboard:"Dashboard",library:"Content Library",draft:"Draft Post",calendar:"Calendar",posts:"Posts",swipe:"Inspiration"};
   const titleWrap = div("",{});
   titleWrap.appendChild(el("div",{style:{fontSize:"15px",fontWeight:600,color:"#1a1a1a"}},tabTitles[state.tab]||""));
   titleWrap.appendChild(el("div",{style:{fontSize:"11px",color:"#9ca3af",marginTop:"1px"}},state.models.find(m=>m.id===state.model)?.label||""));
@@ -4598,8 +4598,9 @@ function renderApp() {
       {id:"library",  label:"Library",  icon:"[lib]"},
       {id:"draft",    label:"Draft",    icon:"[+]"},
       {id:"calendar", label:"Calendar", icon:"[cal]"},
-      {id:"dashboard",label:"Dash",     icon:"[d]"},
-      {id:"posts",    label:"Posts",    icon:"[m]"},
+      {id:"dashboard",  label:"Dash",        icon:"[d]"},
+      {id:"posts",      label:"Posts",       icon:"[m]"},
+      {id:"swipe",      label:"Inspiration", icon:"[s]"},
     ].forEach(t=>{
       const isActive = state.tab===t.id;
       const btn = el("button",{style:{
