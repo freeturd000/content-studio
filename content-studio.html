@@ -214,6 +214,7 @@ let state = {
 
 // ── THUMBNAIL HELPER ─────────────────────────────────────────────────────────
 const thumbCache = {};
+const _msPortals = new Set(); // track dropdowns portalled to body
 function setThumbCache(driveId, url) {
   const old = thumbCache[driveId];
   if (old && old.startsWith("blob:")) URL.revokeObjectURL(old);
@@ -964,6 +965,9 @@ function buildRenderCaches() {
 }
 
 function render() {
+  // Clean up any dropdowns portalled to body from previous render
+  _msPortals.forEach(d => d.remove());
+  _msPortals.clear();
   buildRenderCaches();
   const root = document.getElementById("root");
   root.innerHTML = "";
@@ -1065,21 +1069,23 @@ function renderMultiSelect(label, options, selected, onChange) {
   btn.addEventListener("click", e => {
     e.stopPropagation();
     const isOpen = dropdown.style.display !== "none";
-    if (!isOpen) {
+    if (isOpen) {
+      dropdown.style.display = "none";
+    } else {
       const rect = btn.getBoundingClientRect();
       dropdown.style.top = (rect.bottom + 4) + "px";
       dropdown.style.left = rect.left + "px";
-      if (!dropdown.parentNode) document.body.appendChild(dropdown);
-    }
-    dropdown.style.display = isOpen ? "none" : "block";
-    if (!isOpen) {
+      if (dropdown.parentNode !== document.body) {
+        document.body.appendChild(dropdown);
+        _msPortals.add(dropdown);
+      }
+      dropdown.style.display = "block";
       const closeHandler = () => { dropdown.style.display = "none"; };
       document.addEventListener("click", closeHandler, {once:true});
     }
   });
 
   wrap.appendChild(btn);
-  wrap.appendChild(dropdown);
   return wrap;
 }
 
