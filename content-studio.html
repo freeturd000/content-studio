@@ -119,6 +119,7 @@ input,select,textarea{font-family:system-ui;font-size:12px;color:#1a1a1a;}
 .dark .nav-btn{color:var(--dk-muted);}
 .dark .nav-btn.active{background:rgba(232,230,224,0.1);color:var(--dk-text);}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -173,6 +174,7 @@ let state = {
   calendarMonthOffset: 0,
   calendarFilters: {platforms:[],accounts:[],types:[]},
   metricsFilters:  {platforms:[],accounts:[],types:[]},
+  dashboardFilters: {platforms:[], accounts:[], types:[], years:[], months:[]},
   metricsSortBy: "date",
   metricsSortDir: "desc",
   libraryFolder: "all",
@@ -1063,10 +1065,11 @@ function renderSidebar() {
   const navWrap = div("", {padding:"10px 12px 4px",borderBottom:"1px solid rgba(255,255,255,0.08)"});
   navWrap.appendChild(el("span", {class:"lbl", style:{fontSize:"9px",color:"#6b7280"}}, "VIEWS"));
   [
+    {id:"dashboard",label:"Dashboard"},
     {id:"library", label:"Content Library"},
     {id:"draft",   label:"Draft Post"},
     {id:"calendar",label:"Calendar"},
-    {id:"metrics", label:"Metrics"},
+    {id:"posts",   label:"Posts"},
   ].forEach(t => {
     const btn = el("button", {class:"nav-btn"+(state.tab===t.id?" active":"")}, t.label);
     btn.addEventListener("click", () => setState({tab:t.id}));
@@ -2396,6 +2399,268 @@ function openMetricsLightbox(contentItems, startIdx, draft) {
   show();
 }
 
+function renderDashboard() {
+  const df = state.dashboardFilters;
+  const isAllModels = state.model === "all";
+
+  // All posted drafts
+  const allPostedDrafts = state.drafts.filter(d => getStatus(d) === "posted");
+  const modelDrafts = isAllModels ? allPostedDrafts : allPostedDrafts.filter(d => {
+    const acc = state.accounts.find(a => a.id === d.accountId);
+    return acc?.modelId === state.model;
+  });
+
+  // Apply dashboard filters
+  function applyFilters(drafts) {
+    return drafts.filter(d => {
+      const acc = state.accounts.find(a => a.id === d.accountId);
+      const date = d.scheduledAt || "";
+      const year = date.slice(0,4);
+      const month = date.slice(5,7);
+      if (df.platforms.length && !df.platforms.includes(d.platform)) return false;
+      if (df.accounts.length && !df.accounts.includes(d.accountId)) return false;
+      if (df.types.length && !df.types.includes(d.type)) return false;
+      if (df.years.length && !df.years.includes(year)) return false;
+      if (df.months.length && !df.months.includes(month)) return false;
+      return true;
+    });
+  }
+
+  const filtered = applyFilters(modelDrafts);
+
+  // Aggregate metrics
+  const totalViews    = filtered.reduce((s,d) => s + (parseInt(d.metrics?.views)||0), 0);
+  const totalLikes    = filtered.reduce((s,d) => s + (parseInt(d.metrics?.likes)||0), 0);
+  const totalComments = filtered.reduce((s,d) => s + (parseInt(d.metrics?.comments)||0), 0);
+  const totalPosts    = filtered.length;
+  const avgER = totalViews > 0 ? ((totalLikes + totalComments) / totalViews * 100).toFixed(2) + "%" : "--";
+
+  const modelAccounts = isAllModels
+    ? state.accounts.filter(a => a.status === "active")
+    : state.accounts.filter(a => a.status === "active" && a.modelId === state.model);
+  const totalFollowers = modelAccounts.reduce((s,a) => s + (parseInt(a.followers)||0), 0);
+  const totalAccounts  = modelAccounts.length;
+
+  // Available years/months from data
+  const availYears  = [...new Set(modelDrafts.map(d => (d.scheduledAt||"").slice(0,4)).filter(Boolean))].sort().reverse();
+  const availMonths = [...new Set(modelDrafts.map(d => (d.scheduledAt||"").slice(5,7)).filter(Boolean))].sort();
+  const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  const wrap = div("", {height:"100%", display:"flex", flexDirection:"column", overflow:"hidden"});
+
+  // ── FILTERS BAR ──
+  const toolbar = div("", {padding:"10px 16px", background:"#fff", borderBottom:"1px solid #f0f0f0", display:"flex", alignItems:"center", gap:"8px", flexShrink:0, flexWrap:"wrap"});
+  toolbar.appendChild(renderMultiSelect("Platform", state.platforms.map(p=>({id:p.name,label:p.name,color:p.color})), df.platforms, v=>setState({dashboardFilters:{...df,platforms:v}})));
+
+  const accMulti = renderMultiSelect("Account", state.accounts.filter(a=>a.status==="active").map(a=>({id:a.id,label:(a.sub||a.handle)})), df.accounts, v=>setState({dashboardFilters:{...df,accounts:v}}));
+  if (isAllModels) { accMulti.style.opacity="0.4"; accMulti.style.pointerEvents="none"; accMulti.title="Select a specific model to filter by account"; }
+  toolbar.appendChild(accMulti);
+
+  toolbar.appendChild(renderMultiSelect("Type", state.postTypes.map(t=>({id:t.id,label:t.name})), df.types, v=>setState({dashboardFilters:{...df,types:v}})));
+  toolbar.appendChild(renderMultiSelect("Year", availYears.map(y=>({id:y,label:y})), df.years, v=>setState({dashboardFilters:{...df,years:v}})));
+  toolbar.appendChild(renderMultiSelect("Month", availMonths.map(m=>({id:m,label:MONTH_NAMES[parseInt(m)-1]||m})), df.months, v=>setState({dashboardFilters:{...df,months:v}})));
+
+  if (df.platforms.length||df.accounts.length||df.types.length||df.years.length||df.months.length) {
+    const clearBtn = renderBtn("Clear Filters", false, ()=>setState({dashboardFilters:{platforms:[],accounts:[],types:[],years:[],months:[]}}), {fontSize:"11px",marginLeft:"auto"});
+    toolbar.appendChild(clearBtn);
+  }
+  wrap.appendChild(toolbar);
+
+  // ── SCROLLABLE BODY ──
+  const body = div("content-area", {});
+  wrap.appendChild(body);
+
+  // ── TIER 1: METRIC PILLS ──
+  const pillsRow = div("", {display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:"10px", marginBottom:"20px"});
+  [
+    ["Total Followers", fmt(totalFollowers)],
+    ["Total Accounts",  totalAccounts],
+    ["Total Posts",     totalPosts],
+    ["Total Views",     fmt(totalViews)],
+    ["Total Likes",     fmt(totalLikes)],
+    ["Total Comments",  fmt(totalComments)],
+    ["Avg ER",          avgER],
+  ].forEach(([label, val]) => {
+    const pill = div("card", {padding:"12px 14px", textAlign:"center"});
+    pill.appendChild(el("div", {style:{fontSize:"20px", fontWeight:600, fontFamily:"monospace", marginBottom:"3px"}}, String(val)));
+    pill.appendChild(el("div", {style:{fontSize:"10px", color:"#9ca3af"}}, label));
+    pillsRow.appendChild(pill);
+  });
+  body.appendChild(pillsRow);
+
+  // ── TIER 1: CHARTS ──
+  // Build time-series data bucketed by month
+  function buildTimeSeries(drafts) {
+    const buckets = {};
+    drafts.forEach(d => {
+      const key = (d.scheduledAt||"").slice(0,7); // "YYYY-MM"
+      if (!key || key.length < 7) return;
+      if (!buckets[key]) buckets[key] = {views:0,likes:0,comments:0,count:0};
+      buckets[key].views    += parseInt(d.metrics?.views)||0;
+      buckets[key].likes    += parseInt(d.metrics?.likes)||0;
+      buckets[key].comments += parseInt(d.metrics?.comments)||0;
+      buckets[key].count    += 1;
+    });
+    const keys = Object.keys(buckets).sort();
+    return {
+      labels: keys.map(k => { const [y,m]=k.split("-"); return (MONTH_NAMES[parseInt(m)-1]||m)+" "+y.slice(2); }),
+      views:    keys.map(k => buckets[k].views),
+      likes:    keys.map(k => buckets[k].likes),
+      comments: keys.map(k => buckets[k].comments),
+      counts:   keys.map(k => buckets[k].count),
+      er:       keys.map(k => buckets[k].views > 0 ? +((buckets[k].likes+buckets[k].comments)/buckets[k].views*100).toFixed(2) : 0),
+    };
+  }
+  const ts = buildTimeSeries(filtered);
+
+  const chartsGrid = div("", {display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"14px", marginBottom:"20px"});
+
+  function makeChartCard(title, chartId, type, labels, data, color) {
+    const card = div("card", {padding:"14px"});
+    card.appendChild(el("div", {style:{fontSize:"11px", fontWeight:500, color:"#6b7280", fontFamily:"monospace", marginBottom:"10px", letterSpacing:"0.06em"}}, title));
+    const canvas = el("canvas", {id:chartId, style:{width:"100%", height:"160px", display:"block"}});
+    card.appendChild(canvas);
+    chartsGrid.appendChild(card);
+    // Defer chart creation until canvas is in DOM
+    requestAnimationFrame(() => {
+      const existing = Chart.getChart(chartId);
+      if (existing) existing.destroy();
+      const isDark = state.darkMode;
+      const gridColor = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
+      const tickColor = isDark ? "#8e8c88" : "#9ca3af";
+      new Chart(canvas, {
+        type,
+        data: {
+          labels,
+          datasets: [{
+            label: title,
+            data,
+            backgroundColor: type==="bar" ? color+"99" : color+"33",
+            borderColor: color,
+            borderWidth: 2,
+            fill: type==="line",
+            tension: 0.4,
+            pointRadius: labels.length > 12 ? 2 : 4,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend:{display:false} },
+          scales: {
+            x: { grid:{color:gridColor}, ticks:{color:tickColor, font:{size:10}} },
+            y: { grid:{color:gridColor}, ticks:{color:tickColor, font:{size:10}}, beginAtZero:true },
+          }
+        }
+      });
+    });
+    return card;
+  }
+
+  if (ts.labels.length > 0) {
+    makeChartCard("POSTING FREQUENCY", "dash-chart-freq",    "bar",  ts.labels, ts.counts,   "#6366f1");
+    makeChartCard("VIEWS TREND",       "dash-chart-views",   "line", ts.labels, ts.views,    "#3b82f6");
+    makeChartCard("LIKES TREND",       "dash-chart-likes",   "line", ts.labels, ts.likes,    "#ec4899");
+    makeChartCard("COMMENTS TREND",    "dash-chart-comments","line", ts.labels, ts.comments, "#f59e0b");
+    makeChartCard("ER TREND (%)",      "dash-chart-er",      "line", ts.labels, ts.er,       "#10b981");
+    body.appendChild(chartsGrid);
+  } else {
+    const noData = div("card", {padding:"20px", textAlign:"center", marginBottom:"20px"});
+    noData.appendChild(el("div",{style:{fontSize:"12px",color:"#9ca3af"}},"No chart data yet — post some content first."));
+    body.appendChild(noData);
+  }
+
+  // ── TIER 2: MODEL BREAKDOWN ──
+  const t2Label = div("", {fontSize:"10px", fontWeight:500, color:"#6b7280", fontFamily:"monospace", marginBottom:"10px", letterSpacing:"0.06em"});
+  t2Label.textContent = isAllModels ? "MODEL BREAKDOWN" : "ACCOUNT BREAKDOWN";
+  body.appendChild(t2Label);
+
+  if (isAllModels) {
+    const realModels = state.models.filter(m => m.id !== "all");
+    if (!realModels.length) {
+      body.appendChild(el("div",{style:{fontSize:"12px",color:"#9ca3af",marginBottom:"20px"}},"No models configured yet."));
+    } else {
+      const modelGrid = div("", {display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))", gap:"10px", marginBottom:"20px"});
+      realModels.forEach(m => {
+        const mAccounts = state.accounts.filter(a => a.modelId === m.id && a.status === "active");
+        const mDrafts   = allPostedDrafts.filter(d => mAccounts.some(a => a.id === d.accountId));
+        const mFollowers = mAccounts.reduce((s,a) => s+(parseInt(a.followers)||0), 0);
+        const mViews    = mDrafts.reduce((s,d) => s+(parseInt(d.metrics?.views)||0), 0);
+        const mLikes    = mDrafts.reduce((s,d) => s+(parseInt(d.metrics?.likes)||0), 0);
+        const mComments = mDrafts.reduce((s,d) => s+(parseInt(d.metrics?.comments)||0), 0);
+        const mER = mViews > 0 ? ((mLikes+mComments)/mViews*100).toFixed(1)+"%" : "--";
+        const lastAct = mDrafts.map(d=>d.scheduledAt||"").filter(Boolean).sort().reverse()[0] || null;
+        const card = div("card", {cursor:"pointer"});
+        card.addEventListener("click", () => setState({model:m.id}));
+        card.appendChild(el("div",{style:{fontSize:"13px",fontWeight:600,marginBottom:"8px"}},m.label));
+        [
+          ["Accounts", mAccounts.length],
+          ["Followers", fmt(mFollowers)],
+          ["Posts",    mDrafts.length],
+          ["Avg ER",   mER],
+        ].forEach(([lbl,val]) => {
+          const row = div("",{display:"flex",justifyContent:"space-between",fontSize:"11px",color:"#6b7280",marginBottom:"3px"});
+          row.appendChild(el("span",{},lbl));
+          row.appendChild(el("span",{style:{fontWeight:500,color:"#374151",fontFamily:"monospace"}},String(val)));
+          card.appendChild(row);
+        });
+        if (lastAct) card.appendChild(el("div",{style:{fontSize:"9px",color:"#9ca3af",fontFamily:"monospace",marginTop:"6px"}},"Last: "+lastAct.slice(0,10)));
+        modelGrid.appendChild(card);
+      });
+      body.appendChild(modelGrid);
+    }
+  } else {
+    // Specific model — show account breakdown
+    const mAccs = state.accounts.filter(a => a.modelId === state.model && a.status === "active");
+    if (!mAccs.length) {
+      body.appendChild(el("div",{style:{fontSize:"12px",color:"#9ca3af",marginBottom:"20px"}},"No accounts for this model."));
+    } else {
+      const accGrid = div("", {display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))", gap:"10px", marginBottom:"20px"});
+      mAccs.forEach(acc => {
+        const aDrafts = filtered.filter(d => d.accountId === acc.id);
+        const aViews    = aDrafts.reduce((s,d) => s+(parseInt(d.metrics?.views)||0), 0);
+        const aLikes    = aDrafts.reduce((s,d) => s+(parseInt(d.metrics?.likes)||0), 0);
+        const aComments = aDrafts.reduce((s,d) => s+(parseInt(d.metrics?.comments)||0), 0);
+        const aER = aViews > 0 ? ((aLikes+aComments)/aViews*100).toFixed(1)+"%" : "--";
+        const card = div("card", {});
+        const hdr = div("",{display:"flex",alignItems:"center",gap:"8px",marginBottom:"10px"});
+        hdr.appendChild(renderDot(acc.color, 9));
+        hdr.appendChild(el("div",{},[
+          el("div",{style:{fontSize:"12px",fontWeight:600}},acc.sub||acc.handle),
+          el("div",{style:{fontSize:"10px",color:"#9ca3af",fontFamily:"monospace"}},acc.handle),
+        ]));
+        card.appendChild(hdr);
+        [
+          ["Platform",   acc.platform],
+          ["Followers",  fmt(parseInt(acc.followers)||0)],
+          ["Posts",      aDrafts.length],
+          ["Views",      fmt(aViews)],
+          ["Likes",      fmt(aLikes)],
+          ["Comments",   fmt(aComments)],
+          ["Avg ER",     aER],
+        ].forEach(([lbl,val]) => {
+          const row = div("",{display:"flex",justifyContent:"space-between",fontSize:"11px",color:"#6b7280",marginBottom:"3px"});
+          row.appendChild(el("span",{},lbl));
+          row.appendChild(el("span",{style:{fontWeight:500,color:"#374151",fontFamily:"monospace"}},String(val)));
+          card.appendChild(row);
+        });
+        accGrid.appendChild(card);
+      });
+      body.appendChild(accGrid);
+    }
+  }
+
+  // ── TIER 3: INSIGHTS & RECOMMENDATIONS ──
+  body.appendChild(el("div",{style:{fontSize:"10px",fontWeight:500,color:"#6b7280",fontFamily:"monospace",marginBottom:"10px",letterSpacing:"0.06em"}},"INSIGHTS & RECOMMENDATIONS"));
+  const insightBox = div("card",{padding:"32px",textAlign:"center",marginBottom:"20px"});
+  insightBox.appendChild(el("div",{style:{fontSize:"16px",marginBottom:"8px"}},"💡"));
+  insightBox.appendChild(el("div",{style:{fontSize:"13px",fontWeight:600,marginBottom:"6px",color:"#374151"}},"Insights Coming Soon"));
+  insightBox.appendChild(el("div",{style:{fontSize:"12px",color:"#9ca3af",maxWidth:"360px",margin:"0 auto",lineHeight:1.6}},"AI-powered insights and posting recommendations will appear here once enough data has been collected."));
+  body.appendChild(insightBox);
+
+  return wrap;
+}
+
 function renderMetrics() {
   const wrap = div("",{height:"100%",display:"flex",flexDirection:"column",overflow:"hidden"});
   const mf = state.metricsFilters;
@@ -3721,7 +3986,7 @@ function renderApp() {
   const hamburger = el("button",{class:"mobile-nav",style:{border:"none",background:"transparent",cursor:"pointer",fontSize:"20px",color:"#1a1a1a",padding:"4px 8px",marginRight:"8px"}},"☰");
   hamburger.addEventListener("click",()=>setState({sidebarOpen:!state.sidebarOpen}));
   topbar.appendChild(hamburger);
-  const tabTitles = {library:"Content Library",draft:"Draft Post",calendar:"Calendar",metrics:"Metrics"};
+  const tabTitles = {dashboard:"Dashboard",library:"Content Library",draft:"Draft Post",calendar:"Calendar",posts:"Posts"};
   const titleWrap = div("",{});
   titleWrap.appendChild(el("div",{style:{fontSize:"15px",fontWeight:600,color:"#1a1a1a"}},tabTitles[state.tab]||""));
   titleWrap.appendChild(el("div",{style:{fontSize:"11px",color:"#9ca3af",marginTop:"1px"}},state.models.find(m=>m.id===state.model)?.label||""));
@@ -3737,10 +4002,11 @@ function renderApp() {
 
   // Tab content
   const content = div("",{flex:1,overflow:"hidden"});
+  if (state.tab==="dashboard") content.appendChild(renderDashboard());
   if (state.tab==="library")  content.appendChild(renderLibrary());
   if (state.tab==="draft")    content.appendChild(renderDraft());
   if (state.tab==="calendar") content.appendChild(renderCalendar());
-  if (state.tab==="metrics")  content.appendChild(renderMetrics());
+  if (state.tab==="posts")    content.appendChild(renderMetrics());
   main.appendChild(content);
   app.appendChild(main);
 
@@ -3762,7 +4028,8 @@ function renderApp() {
       {id:"library",  label:"Library",  icon:"[lib]"},
       {id:"draft",    label:"Draft",    icon:"[+]"},
       {id:"calendar", label:"Calendar", icon:"[cal]"},
-      {id:"metrics",  label:"Metrics",  icon:"[m]"},
+      {id:"dashboard",label:"Dash",     icon:"[d]"},
+      {id:"posts",    label:"Posts",    icon:"[m]"},
     ].forEach(t=>{
       const isActive = state.tab===t.id;
       const btn = el("button",{style:{
