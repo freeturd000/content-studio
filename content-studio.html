@@ -199,7 +199,7 @@ let state = {
   swipeInspoDetail: null,
   swipeShowNewAccount: false,
   swipeShowNewInspo: false,
-  swipeFilters: {platform:"all", postType:"all", search:""},
+  swipeFilters: {platforms:[], postTypes:[], accountSearch:"", inspoSearch:""},
   swipeSortBy: "lastUpdated",
   swipeSortDir: "desc",
   showUpload: false,
@@ -217,7 +217,7 @@ const thumbCache = {};
 function setThumbCache(driveId, url) {
   const old = thumbCache[driveId];
   if (old && old.startsWith("blob:")) URL.revokeObjectURL(old);
-  setThumbCache(driveId, url);
+  thumbCache[driveId] = url;
 }
 function setThumbSrc(img, driveId) {
   if (!driveId) return;
@@ -426,7 +426,7 @@ async function loadFromSheets() {
       sheetsGet("Models!A2:C"), sheetsGet("Accounts!A2:J"), sheetsGet("Platforms!A2:C"),
       sheetsGet("PostTypes!A2:B"), sheetsGet("Folders!A2:D"), sheetsGet("Content!A2:K"),
       sheetsGet("Drafts!A2:P"), sheetsGet("Posts!A2:H"),
-      sheetsGet("SwipeAccounts!A2:M"), sheetsGet("SwipeInspo!A2:M"),
+      sheetsGet("SwipeAccounts!A2:N"), sheetsGet("SwipeInspo!A2:P"),
     ]);
 
     const models = modelsData.length ? modelsData.map(r => ({id:r[0],label:r[1]})) : state.models;
@@ -465,7 +465,7 @@ async function loadFromSheets() {
       followers:parseInt(r[4])||0, posts:parseInt(r[5])||0, following:parseInt(r[6])||0,
       likes:parseInt(r[7])||0, niche:r[8]||"", whyGood:r[9]||"", notes:r[10]||"",
       modelIds: r[11] ? r[11].split("|") : ["all"],
-      lastUpdated:r[12]||"",
+      lastUpdated:r[12]||"", profilePicDriveId:r[13]||"",
     }));
     const swipeInspo = (swipeInspoData||[]).map(r => ({
       id:r[0], platform:r[1]||"", account:r[2]||"", postType:r[3]||"",
@@ -473,7 +473,7 @@ async function loadFromSheets() {
       likes:parseInt(r[7])||0, comments:parseInt(r[8])||0, notes:r[9]||"",
       modelIds: r[10] ? r[10].split("|") : ["all"],
       driveFileIds: r[11] ? r[11].split("|") : [],
-      lastUpdated:r[12]||"",
+      lastUpdated:r[12]||"", name:r[13]||"", postDate:r[14]||"", postLink:r[15]||"",
     }));
 
     state.models=models; state.platforms=platforms; state.postTypes=postTypes;
@@ -539,17 +539,18 @@ async function saveToSheets() {
       d.lastMetricsUpdated||""
     ]));
 
-    await sheetsClear("SwipeAccounts!A2:M");
+    await sheetsClear("SwipeAccounts!A2:N");
     if (state.swipeAccounts.length) await sheetsSet("SwipeAccounts!A2", state.swipeAccounts.map(a=>[
       a.id, a.platform, a.handle, a.profileLink, a.followers, a.posts, a.following,
-      a.likes, a.niche, a.whyGood, a.notes, (a.modelIds||["all"]).join("|"), a.lastUpdated||""
+      a.likes, a.niche, a.whyGood, a.notes, (a.modelIds||["all"]).join("|"), a.lastUpdated||"", a.profilePicDriveId||""
     ]));
 
-    await sheetsClear("SwipeInspo!A2:M");
+    await sheetsClear("SwipeInspo!A2:P");
     if (state.swipeInspo.length) await sheetsSet("SwipeInspo!A2", state.swipeInspo.map(p=>[
       p.id, p.platform, p.account, p.postType, p.caption, p.hashtags,
       p.views||0, p.likes||0, p.comments||0, p.notes,
-      (p.modelIds||["all"]).join("|"), (p.driveFileIds||[]).join("|"), p.lastUpdated||""
+      (p.modelIds||["all"]).join("|"), (p.driveFileIds||[]).join("|"), p.lastUpdated||"",
+      p.name||"", p.postDate||"", p.postLink||""
     ]));
 
     setState({syncing:false, lastSynced: new Date().toLocaleTimeString()});
@@ -1037,7 +1038,7 @@ function renderMultiSelect(label, options, selected, onChange) {
   const display = isAll ? label : selected.length <= 2 ? selected.map(s=>options.find(o=>o.id===s)?.label||s).join(", ") : selected.length+" selected";
 
   const btn = el("button", {style:{padding:"5px 10px",border:"1px solid #e5e7eb",borderRadius:"8px",background:"#fff",fontSize:"11px",cursor:"pointer",display:"flex",alignItems:"center",gap:"5px",color:"#374151",whiteSpace:"nowrap"}}, display+" v");
-  const dropdown = el("div", {style:{display:"none",position:"absolute",top:"100%",left:0,zIndex:999,background:"#fff",border:"1px solid #e5e7eb",borderRadius:"10px",boxShadow:"0 4px 20px rgba(0,0,0,0.1)",minWidth:"160px",marginTop:"4px",padding:"4px"}});
+  const dropdown = el("div", {style:{display:"none",position:"fixed",zIndex:9999,background:"#fff",border:"1px solid #e5e7eb",borderRadius:"10px",boxShadow:"0 4px 20px rgba(0,0,0,0.1)",minWidth:"160px",padding:"4px"}});
 
   const allLabel = el("label", {style:{display:"flex",alignItems:"center",gap:"8px",padding:"6px 10px",cursor:"pointer",borderRadius:"6px",background:isAll?"#f3f4f6":"transparent",borderBottom:"1px solid #f0f0f0",marginBottom:"2px"}});
   const allCheck = el("input", {type:"checkbox", style:{width:"12px",height:"12px",cursor:"pointer"}});
@@ -1064,6 +1065,12 @@ function renderMultiSelect(label, options, selected, onChange) {
   btn.addEventListener("click", e => {
     e.stopPropagation();
     const isOpen = dropdown.style.display !== "none";
+    if (!isOpen) {
+      const rect = btn.getBoundingClientRect();
+      dropdown.style.top = (rect.bottom + 4) + "px";
+      dropdown.style.left = rect.left + "px";
+      if (!dropdown.parentNode) document.body.appendChild(dropdown);
+    }
     dropdown.style.display = isOpen ? "none" : "block";
     if (!isOpen) {
       const closeHandler = () => { dropdown.style.display = "none"; };
@@ -2760,21 +2767,21 @@ function renderSwipe() {
 
   // Filter accounts
   let filteredAccounts = state.swipeAccounts.filter(modelFilter);
-  if (sf.platform !== "all") filteredAccounts = filteredAccounts.filter(a => a.platform === sf.platform);
-  if (sf.search) filteredAccounts = filteredAccounts.filter(a =>
-    a.handle.toLowerCase().includes(sf.search.toLowerCase()) ||
-    a.niche.toLowerCase().includes(sf.search.toLowerCase()) ||
-    a.notes.toLowerCase().includes(sf.search.toLowerCase())
+  if (sf.platforms.length) filteredAccounts = filteredAccounts.filter(a => sf.platforms.includes(a.platform));
+  if (sf.accountSearch) filteredAccounts = filteredAccounts.filter(a =>
+    (a.handle||"").toLowerCase().includes(sf.accountSearch.toLowerCase()) ||
+    (a.niche||"").toLowerCase().includes(sf.accountSearch.toLowerCase()) ||
+    (a.notes||"").toLowerCase().includes(sf.accountSearch.toLowerCase())
   );
 
   // Filter inspo
   let filteredInspo = state.swipeInspo.filter(modelFilter);
-  if (sf.platform !== "all") filteredInspo = filteredInspo.filter(p => p.platform === sf.platform);
-  if (sf.postType !== "all") filteredInspo = filteredInspo.filter(p => p.postType === sf.postType);
-  if (sf.search) filteredInspo = filteredInspo.filter(p =>
-    p.account.toLowerCase().includes(sf.search.toLowerCase()) ||
-    p.caption.toLowerCase().includes(sf.search.toLowerCase()) ||
-    p.notes.toLowerCase().includes(sf.search.toLowerCase())
+  if (sf.platforms.length) filteredInspo = filteredInspo.filter(p => sf.platforms.includes(p.platform));
+  if (sf.postTypes.length) filteredInspo = filteredInspo.filter(p => sf.postTypes.includes(p.postType));
+  if (sf.inspoSearch) filteredInspo = filteredInspo.filter(p =>
+    (p.account||"").toLowerCase().includes(sf.inspoSearch.toLowerCase()) ||
+    (p.caption||"").toLowerCase().includes(sf.inspoSearch.toLowerCase()) ||
+    (p.notes||"").toLowerCase().includes(sf.inspoSearch.toLowerCase())
   );
 
   // Sort
@@ -2785,6 +2792,10 @@ function renderSwipe() {
       else if (state.swipeSortBy==="views") { av=a.views||0; bv=b.views||0; }
       else if (state.swipeSortBy==="likes") { av=a.likes||0; bv=b.likes||0; }
       else if (state.swipeSortBy==="comments") { av=a.comments||0; bv=b.comments||0; }
+      else if (state.swipeSortBy==="engRate") {
+        av=(a.views||0)>0?((a.likes||0)+(a.comments||0))/(a.views||1):0;
+        bv=(b.views||0)>0?((b.likes||0)+(b.comments||0))/(b.views||1):0;
+      }
       else { av=new Date(a.lastUpdated||0); bv=new Date(b.lastUpdated||0); }
       return state.swipeSortDir==="desc" ? bv-av : av-bv;
     });
@@ -2807,27 +2818,26 @@ function renderSwipe() {
   toolbar.appendChild(secWrap);
 
   // Search
-  const searchInp = el("input", {class:"inp", placeholder:"Search...", style:{width:"160px", fontSize:"11px"}});
-  searchInp.value = sf.search;
-  searchInp.addEventListener("input", e => { state.swipeFilters = {...sf, search:e.target.value}; render(); });
+  const searchKey = state.swipeSection==="accounts" ? "accountSearch" : "inspoSearch";
+  const searchInp = el("input", {class:"inp", placeholder:"Search...", style:{width:"150px", fontSize:"11px"}});
+  searchInp.value = sf[searchKey]||"";
+  searchInp.addEventListener("input", e => { state.swipeFilters = {...sf, [searchKey]:e.target.value}; render(); });
   toolbar.appendChild(searchInp);
 
-  // Platform filter
-  const platOpts = [{value:"all",label:"All Platforms"}, ...state.platforms.map(p=>({value:p.name,label:p.name}))];
-  toolbar.appendChild(renderSel(sf.platform, platOpts, v => setState({swipeFilters:{...sf,platform:v}})));
+  // Platform filter (multi-select pills)
+  toolbar.appendChild(renderMultiSelect("Platform", state.platforms.map(p=>({id:p.name,label:p.name,color:p.color})), sf.platforms, v=>setState({swipeFilters:{...sf,platforms:v}})));
 
   // Post type filter (inspo only)
   if (state.swipeSection === "inspo") {
-    const typeOpts = [{value:"all",label:"All Types"}, ...state.postTypes.map(t=>({value:t.id,label:t.name}))];
-    toolbar.appendChild(renderSel(sf.postType, typeOpts, v => setState({swipeFilters:{...sf,postType:v}})));
+    toolbar.appendChild(renderMultiSelect("Type", state.postTypes.map(t=>({id:t.id,label:t.name})), sf.postTypes, v=>setState({swipeFilters:{...sf,postTypes:v}})));
   }
 
   // Sort
   const sortOpts = state.swipeSection==="accounts"
-    ? [{value:"lastUpdated",label:"Date"},{value:"followers",label:"Followers"}]
-    : [{value:"lastUpdated",label:"Date"},{value:"views",label:"Views"},{value:"likes",label:"Likes"},{value:"comments",label:"Comments"}];
+    ? [{value:"lastUpdated",label:"Date"},{value:"followers",label:"Followers"},{value:"likes",label:"Likes"}]
+    : [{value:"lastUpdated",label:"Date"},{value:"views",label:"Views"},{value:"likes",label:"Likes"},{value:"comments",label:"Comments"},{value:"engRate",label:"Eng. Rate"}];
   toolbar.appendChild(renderSel(state.swipeSortBy, sortOpts, v => setState({swipeSortBy:v})));
-  toolbar.appendChild(renderBtn(state.swipeSortDir==="desc"?"Desc":"Asc", false, ()=>setState({swipeSortDir:state.swipeSortDir==="desc"?"asc":"desc"}), {fontSize:"11px"}));
+  toolbar.appendChild(renderBtn(state.swipeSortDir==="desc"?"↓":"↑", false, ()=>setState({swipeSortDir:state.swipeSortDir==="desc"?"asc":"desc"}), {fontSize:"12px",padding:"4px 8px"}));
 
   // Add button
   const addLabel = state.swipeSection==="accounts" ? "+ Add Account" : "+ Add Post";
@@ -2852,13 +2862,23 @@ function renderSwipe() {
         const card = div("card", {cursor:"pointer", border:isSelected?"2px solid #1c1c1e":"2px solid transparent"});
         card.addEventListener("click", () => setState({swipeAccountDetail: isSelected ? null : a, swipeInspoDetail:null}));
 
-        // Platform badge + handle
+        // Profile pic + handle header
         const hdr = div("", {display:"flex", alignItems:"center", gap:"8px", marginBottom:"8px"});
-        hdr.appendChild(el("span", {style:{fontSize:"10px", padding:"2px 8px", borderRadius:"20px", background:platColor+"22", color:platColor, fontFamily:"monospace", fontWeight:600}}, a.platform||""));
-        hdr.appendChild(el("div", {style:{flex:1, minWidth:0}}, [
-          el("div", {style:{fontSize:"12px", fontWeight:600, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis"}}, a.handle||"—"),
-          a.niche ? el("div", {style:{fontSize:"10px", color:"#9ca3af", fontFamily:"monospace"}}, a.niche) : null,
-        ].filter(Boolean)));
+        const picWrap = div("", {width:"36px", height:"36px", borderRadius:"50%", background:"#e5e7eb", overflow:"hidden", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"14px", color:"#9ca3af"});
+        if (a.profilePicDriveId) {
+          const pImg = el("img", {style:{width:"100%",height:"100%",objectFit:"cover"}});
+          pImg.onerror = ()=>{ pImg.style.display="none"; };
+          setThumbSrc(pImg, a.profilePicDriveId);
+          picWrap.appendChild(pImg);
+        } else {
+          picWrap.appendChild(txt((a.handle||"?")[0].toUpperCase()));
+        }
+        hdr.appendChild(picWrap);
+        const hdrText = el("div", {style:{flex:1, minWidth:0}});
+        hdrText.appendChild(el("div", {style:{fontSize:"12px", fontWeight:600, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis"}}, a.handle||"—"));
+        hdrText.appendChild(el("span", {style:{fontSize:"10px", padding:"2px 6px", borderRadius:"20px", background:platColor+"22", color:platColor, fontFamily:"monospace", fontWeight:600}}, a.platform||""));
+        if (a.niche) hdrText.appendChild(el("div", {style:{fontSize:"10px", color:"#9ca3af", fontFamily:"monospace", marginTop:"2px"}}, a.niche));
+        hdr.appendChild(hdrText);
         card.appendChild(hdr);
 
         // Stats row
@@ -2915,7 +2935,8 @@ function renderSwipe() {
         if (p.account) hdr.appendChild(el("span",{style:{fontSize:"10px",color:"#6b7280",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",flex:1}},"@"+p.account));
         card.appendChild(hdr);
 
-        if (p.caption) card.appendChild(el("div",{style:{fontSize:"11px",color:"#374151",marginBottom:"6px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",lineHeight:1.4}},p.caption));
+        if (p.name) card.appendChild(el("div",{style:{fontSize:"10px",fontWeight:600,color:"#374151",marginBottom:"4px",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",fontFamily:"monospace"}},p.name));
+        else if (p.caption) card.appendChild(el("div",{style:{fontSize:"11px",color:"#374151",marginBottom:"6px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",lineHeight:1.4}},p.caption));
 
         // Metrics
         const mRow = div("",{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"4px",marginBottom:"6px"});
@@ -2967,6 +2988,33 @@ function renderSwipe() {
       row.appendChild(inp);
       return row;
     }
+
+    // Profile picture
+    const picRow = div("",{marginBottom:"12px",display:"flex",alignItems:"center",gap:"10px"});
+    const picPreview = div("",{width:"56px",height:"56px",borderRadius:"50%",background:"#e5e7eb",overflow:"hidden",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"22px",color:"#9ca3af"});
+    if (a.profilePicDriveId) {
+      const pImg = el("img",{style:{width:"100%",height:"100%",objectFit:"cover"}});
+      pImg.onerror=()=>{pImg.style.display="none";};
+      setThumbSrc(pImg, a.profilePicDriveId);
+      picPreview.appendChild(pImg);
+    } else {
+      picPreview.appendChild(txt((a.handle||"?")[0].toUpperCase()));
+    }
+    picRow.appendChild(picPreview);
+    const picFileInp = el("input",{type:"file",style:{display:"none"}});
+    picFileInp.accept="image/*";
+    picFileInp.addEventListener("change",async()=>{
+      const file = picFileInp.files[0]; if (!file) return;
+      const result = await driveUploadFile(file, file.name, SWIPE_ACCOUNTS_FOLDER_ID);
+      if (result.id) {
+        const updated = {...a, profilePicDriveId:result.id, lastUpdated:new Date().toISOString()};
+        setState({swipeAccounts:state.swipeAccounts.map(x=>x.id===a.id?updated:x), swipeAccountDetail:updated});
+        if(isAuthenticated()) saveToSheets();
+      }
+    });
+    picRow.appendChild(renderBtn(a.profilePicDriveId?"Change Photo":"Upload Photo", false, ()=>picFileInp.click(), {fontSize:"11px"}));
+    picRow.appendChild(picFileInp);
+    panel.appendChild(picRow);
 
     panel.appendChild(swipeAccField("HANDLE","handle"));
     panel.appendChild(swipeAccField("PLATFORM","platform"));
@@ -3055,9 +3103,12 @@ function renderSwipe() {
       return row;
     }
 
+    if (p.name) panel.appendChild(el("div",{style:{fontSize:"11px",fontWeight:600,color:"#374151",marginBottom:"10px",fontFamily:"monospace",wordBreak:"break-all"}},p.name));
     panel.appendChild(swipeInspoField("PLATFORM","platform"));
     panel.appendChild(swipeInspoField("ACCOUNT","account"));
     panel.appendChild(swipeInspoField("POST TYPE","postType"));
+    panel.appendChild(swipeInspoField("POST DATE","postDate","date"));
+    panel.appendChild(swipeInspoField("POST LINK","postLink","url"));
     panel.appendChild(swipeInspoField("CAPTION","caption","textarea"));
     panel.appendChild(swipeInspoField("HASHTAGS","hashtags","textarea"));
 
@@ -3079,6 +3130,10 @@ function renderSwipe() {
     });
 
     panel.appendChild(swipeInspoField("NOTES","notes","textarea"));
+
+    if (p.postLink) {
+      panel.appendChild(renderBtn("Open Post ↗", false, ()=>window.open(p.postLink,"_blank"), {fontSize:"11px",width:"100%",justifyContent:"center",marginBottom:"8px"}));
+    }
 
     // Model assignment
     const modRow = div("",{marginBottom:"10px"});
@@ -3146,6 +3201,24 @@ function renderSwipe() {
       modal.appendChild(row);
     });
 
+    // Profile picture upload
+    modal.appendChild(el("span",{class:"lbl"},"PROFILE PICTURE"));
+    let newAccPicId = null;
+    const newAccPicStatus = el("div",{style:{fontSize:"11px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"8px"}});
+    const newAccPicInp = el("input",{type:"file",style:{display:"none"}});
+    newAccPicInp.accept="image/*";
+    newAccPicInp.addEventListener("change",async()=>{
+      const file = newAccPicInp.files[0]; if(!file) return;
+      newAccPicStatus.textContent="Uploading...";
+      const result = await driveUploadFile(file, file.name, SWIPE_ACCOUNTS_FOLDER_ID);
+      if(result.id){newAccPicId=result.id; newAccPicStatus.textContent="Photo ready.";}
+    });
+    const picUploadRow = div("",{display:"flex",gap:"8px",alignItems:"center",marginBottom:"10px"});
+    picUploadRow.appendChild(renderBtn("Upload Photo",false,()=>newAccPicInp.click(),{fontSize:"11px"}));
+    picUploadRow.appendChild(newAccPicStatus);
+    modal.appendChild(picUploadRow);
+    modal.appendChild(newAccPicInp);
+
     const saveBtn = renderBtn("Save Account", true, ()=>{
       const newAcc = {
         id:"sw"+Date.now(), platform:fields.platform.value||"", handle:fields.handle.value||"",
@@ -3153,7 +3226,7 @@ function renderSwipe() {
         posts:parseInt(fields.posts.value)||0, following:parseInt(fields.following.value)||0,
         likes:parseInt(fields.likes.value)||0, niche:fields.niche.value||"",
         whyGood:fields.whyGood.value||"", notes:fields.notes.value||"",
-        modelIds:["all"], lastUpdated:new Date().toISOString(),
+        modelIds:["all"], profilePicDriveId:newAccPicId||"", lastUpdated:new Date().toISOString(),
       };
       setState({swipeAccounts:[...state.swipeAccounts,newAcc], swipeShowNewAccount:false});
       if(isAuthenticated()) saveToSheets();
@@ -3177,7 +3250,7 @@ function renderSwipe() {
     modal.appendChild(mh);
 
     const nf = {};
-    [{l:"PLATFORM",k:"platform",type:"select"},{l:"ACCOUNT",k:"account"},{l:"POST TYPE",k:"postType",type:"typeSelect"},{l:"CAPTION",k:"caption",type:"textarea"},{l:"HASHTAGS",k:"hashtags",type:"textarea"},{l:"VIEWS",k:"views",type:"number"},{l:"LIKES",k:"likes",type:"number"},{l:"COMMENTS",k:"comments",type:"number"},{l:"NOTES",k:"notes",type:"textarea"}].forEach(f=>{
+    [{l:"PLATFORM",k:"platform",type:"select"},{l:"ACCOUNT",k:"account"},{l:"POST TYPE",k:"postType",type:"typeSelect"},{l:"POST DATE",k:"postDate",type:"date"},{l:"POST LINK",k:"postLink",type:"url"},{l:"CAPTION",k:"caption",type:"textarea"},{l:"HASHTAGS",k:"hashtags",type:"textarea"},{l:"VIEWS",k:"views",type:"number"},{l:"LIKES",k:"likes",type:"number"},{l:"COMMENTS",k:"comments",type:"number"},{l:"NOTES",k:"notes",type:"textarea"}].forEach(f=>{
       const row = div("",{marginBottom:"10px"});
       row.appendChild(el("span",{class:"lbl"},f.l));
       let inp;
@@ -3189,34 +3262,64 @@ function renderSwipe() {
     });
 
     // File upload
-    modal.appendChild(el("span",{class:"lbl"},"FILES (from Drive or upload)"));
+    modal.appendChild(el("span",{class:"lbl"},"FILES"));
     let newFileIds = [];
     const fileStatus = el("div",{style:{fontSize:"11px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"8px"}});
     const fileInp = el("input",{type:"file",style:{display:"none"},multiple:true});
     fileInp.accept = "image/*,video/*";
-    fileInp.addEventListener("change", async()=>{
-      const files = [...fileInp.files];
-      if (!files.length) return;
-      fileStatus.textContent = "Uploading "+files.length+" file(s)...";
-      for (const file of files) {
-        try {
-          const result = await driveUploadFile(file, file.name, SWIPE_POSTS_FOLDER_ID);
-          if (result.id) newFileIds.push(result.id);
-        } catch(e) {}
-      }
-      fileStatus.textContent = newFileIds.length+" file(s) ready.";
+    // Files are uploaded after save (once we know the folder)
+    fileInp.addEventListener("change", ()=>{
+      fileStatus.textContent = fileInp.files.length+" file(s) selected.";
     });
-    const uploadFilesBtn = renderBtn("Upload Files", false, ()=>fileInp.click(), {fontSize:"11px"});
+    const uploadFilesBtn = renderBtn("Select Files", false, ()=>fileInp.click(), {fontSize:"11px"});
     const fileRow = div("",{display:"flex",gap:"8px",alignItems:"center",marginBottom:"10px"});
     fileRow.appendChild(uploadFilesBtn);
     fileRow.appendChild(fileStatus);
     modal.appendChild(fileRow);
     modal.appendChild(fileInp);
 
-    const saveBtn = renderBtn("Save Post", true, ()=>{
+    // Helper: generate post name
+    function genInspoName(platform, account, postType, postDate) {
+      const datePart = postDate ? postDate.replace(/-/g,"") : new Date().toISOString().slice(0,10).replace(/-/g,"");
+      const base = [platform||"Post", account||"Account", postType||"Type", datePart].join(" - ");
+      const existing = state.swipeInspo.filter(p => (p.name||"").startsWith(base));
+      const num = String(existing.length + 1).padStart(3,"0");
+      return base + " - " + num;
+    }
+
+    const saveBtn = renderBtn("Save Post", true, async ()=>{
+      saveBtn.disabled = true;
+      fileStatus.textContent = "Saving...";
+      const platform = nf.platform.value||"";
+      const account = nf.account.value||"";
+      const postType = nf.postType.value||"";
+      const postDate = nf.postDate.value||"";
+      const postName = genInspoName(platform, account, postType, postDate);
+
+      // Create Drive subfolder named after the post
+      let folderId = SWIPE_POSTS_FOLDER_ID;
+      if (isAuthenticated()) {
+        try {
+          const folderResult = await driveCreateFolder(postName, SWIPE_POSTS_FOLDER_ID);
+          if (folderResult.id) folderId = folderResult.id;
+        } catch(e) {}
+      }
+
+      // Upload files into the subfolder
+      if (fileInp.files.length && isAuthenticated()) {
+        fileStatus.textContent = "Uploading files...";
+        for (const file of [...fileInp.files]) {
+          try {
+            const result = await driveUploadFile(file, file.name, folderId);
+            if (result.id) newFileIds.push(result.id);
+          } catch(e) {}
+        }
+      }
+
       const newPost = {
-        id:"si"+Date.now(), platform:nf.platform.value||"", account:nf.account.value||"",
-        postType:nf.postType.value||"", caption:nf.caption.value||"", hashtags:nf.hashtags.value||"",
+        id:"si"+Date.now(), name:postName, platform, account, postType,
+        postDate, postLink:nf.postLink.value||"",
+        caption:nf.caption.value||"", hashtags:nf.hashtags.value||"",
         views:parseInt(nf.views.value)||0, likes:parseInt(nf.likes.value)||0,
         comments:parseInt(nf.comments.value)||0, notes:nf.notes.value||"",
         modelIds:["all"], driveFileIds:[...newFileIds], lastUpdated:new Date().toISOString(),
