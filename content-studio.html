@@ -403,7 +403,7 @@ async function loadFromSheets() {
     const [modelsData, accountsData, platformsData, postTypesData, foldersData, contentData, draftsData, postsData] = await Promise.all([
       sheetsGet("Models!A2:C"), sheetsGet("Accounts!A2:J"), sheetsGet("Platforms!A2:C"),
       sheetsGet("PostTypes!A2:B"), sheetsGet("Folders!A2:D"), sheetsGet("Content!A2:K"),
-      sheetsGet("Drafts!A2:O"), sheetsGet("Posts!A2:H"),
+      sheetsGet("Drafts!A2:P"), sheetsGet("Posts!A2:H"),
     ]);
 
     const models = modelsData.length ? modelsData.map(r => ({id:r[0],label:r[1]})) : state.models;
@@ -434,6 +434,7 @@ async function loadFromSheets() {
       overlays:   r[6] ? r[6].split("|") : [],
       caption:r[7]||"", hashtags:r[8]||"", scheduledAt:r[9]||"", status:r[10]||"draft", postOrder:parseInt(r[11])||1,
       metrics: {views:parseInt(r[12])||0, likes:parseInt(r[13])||0, comments:parseInt(r[14])||0},
+      lastMetricsUpdated: r[15]||null,
     }));
 
     state.models=models; state.platforms=platforms; state.postTypes=postTypes;
@@ -489,12 +490,13 @@ async function saveToSheets() {
     const postRows = state.content.flatMap(c => (c.posts||[]).map(p=>[c.id,p.accountId,p.date,p.views||0,p.likes||0,p.comments||0,p.postName||"",""]));
     if (postRows.length) await sheetsSet("Posts!A2", postRows);
 
-    await sheetsClear("Drafts!A2:L");
+    await sheetsClear("Drafts!A2:P");
     if (state.drafts.length) await sheetsSet("Drafts!A2", state.drafts.map(d=>[
       d.id, d.name, d.accountId, d.platform, d.type,
       (d.contentIds||[]).join("|"), (Array.isArray(d.overlays)?d.overlays:[]).join("|"),
       d.caption, d.hashtags, d.scheduledAt, d.status, d.postOrder,
-      d.metrics?.views||0, d.metrics?.likes||0, d.metrics?.comments||0
+      d.metrics?.views||0, d.metrics?.likes||0, d.metrics?.comments||0,
+      d.lastMetricsUpdated||""
     ]));
 
     setState({syncing:false, lastSynced: new Date().toLocaleTimeString()});
@@ -2339,7 +2341,7 @@ function openMetricsLightbox(contentItems, startIdx, draft) {
   const overlay = div("overlay",{zIndex:2000,background:"rgba(0,0,0,0.88)"});
   document.body.appendChild(overlay);
 
-  const box = div("",{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:2001,background:"#1c1c1e",borderRadius:"14px",padding:"20px",maxWidth:"860px",width:"92vw",maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 24px 60px rgba(0,0,0,0.7)"});
+  const box = div("",{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:2001,background:"#1c1c1e",borderRadius:"14px",padding:"20px",maxWidth:"860px",width:"92vw",height:"88vh",display:"flex",flexDirection:"column",boxShadow:"0 24px 60px rgba(0,0,0,0.7)"});
   box.addEventListener("click",e=>e.stopPropagation());
   document.body.appendChild(box);
 
