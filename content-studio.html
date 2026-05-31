@@ -199,7 +199,7 @@ let state = {
   swipeInspoDetail: null,
   swipeShowNewAccount: false,
   swipeShowNewInspo: false,
-  swipeFilters: {platforms:[], postTypes:[], accountSearch:"", inspoSearch:"", modelIds:[]},
+  swipeFilters: {platforms:[], postTypes:[], accountSearch:"", inspoSearch:"", accountHandles:[]},
   swipeSortBy: "lastUpdated",
   swipeSortDir: "desc",
   showUpload: false,
@@ -424,13 +424,13 @@ async function loadFromSheets() {
     ]);
 
     const [modelsData, accountsData, platformsData, postTypesData, foldersData, contentData, draftsData, postsData, swipeAccountsData, swipeInspoData] = await Promise.all([
-      sheetsGet("Models!A2:C"), sheetsGet("Accounts!A2:J"), sheetsGet("Platforms!A2:C"),
+      sheetsGet("Models!A2:D"), sheetsGet("Accounts!A2:J"), sheetsGet("Platforms!A2:C"),
       sheetsGet("PostTypes!A2:B"), sheetsGet("Folders!A2:D"), sheetsGet("Content!A2:K"),
       sheetsGet("Drafts!A2:Q"), sheetsGet("Posts!A2:H"),
       sheetsGet("SwipeAccounts!A2:N"), sheetsGet("SwipeInspo!A2:P"),
     ]);
 
-    const models = modelsData.length ? modelsData.map(r => ({id:r[0],label:r[1],picDriveId:r[2]||""})) : state.models;
+    const models = modelsData.length ? modelsData.map(r => ({id:r[0],label:r[1],picDriveId:r[2]||"",driveFolderId:r[3]||""})) : state.models;
     if (!models.find(m => m.id === "all")) models.unshift({id:"all",label:"All Models"});
 
     const platforms = platformsData.length ? platformsData.map(r => ({id:r[0],name:r[1],color:r[2]||"#888"})) : state.platforms;
@@ -507,9 +507,9 @@ async function saveToSheets() {
   if (!isAuthenticated()) return;
   setState({syncing: true});
   try {
-    await sheetsClear("Models!A2:C");
+    await sheetsClear("Models!A2:D");
     if (state.models.filter(m=>m.id!=="all").length) {
-      await sheetsSet("Models!A2", state.models.filter(m=>m.id!=="all").map(m=>[m.id,m.label,m.picDriveId||""]));
+      await sheetsSet("Models!A2", state.models.filter(m=>m.id!=="all").map(m=>[m.id,m.label,m.picDriveId||"",m.driveFolderId||""]));
     }
 
     await sheetsClear("Platforms!A2:C");
@@ -567,6 +567,13 @@ async function driveListFolder(folderId) {
   });
   const data = await r.json();
   return data.files || [];
+}
+
+async function getOrCreateSubfolder(parentId, name) {
+  const files = await driveListFolder(parentId);
+  const existing = files.find(f => f.mimeType === "application/vnd.google-apps.folder" && f.name === name);
+  if (existing) return existing.id;
+  return await driveCreateFolder(name, parentId);
 }
 
 async function driveCreateFolder(name, parentId) {
@@ -667,6 +674,8 @@ async function createModelInDrive(modelName) {
     await driveCreateFolder("04 - Edit", nsfwId);
     await driveCreateFolder("05 - Ready", nsfwId);
     await driveCreateFolder("04 - AI", folderId);
+    await driveCreateFolder("05 - Content Studio PFP", folderId);
+    await driveCreateFolder("06 - Accounts", folderId);
     return {folderId, folderName};
   } catch(e) {
     console.error("Drive folder creation failed:", e);
@@ -2797,9 +2806,6 @@ function renderSwipe() {
   // Filter accounts
   let filteredAccounts = state.swipeAccounts.filter(modelFilter);
   if (sf.platforms.length) filteredAccounts = filteredAccounts.filter(a => sf.platforms.includes(a.platform));
-  if (sf.modelIds.length) filteredAccounts = filteredAccounts.filter(a =>
-    (a.modelIds||["all"]).some(id => id==="all" || sf.modelIds.includes(id))
-  );
   if (sf.accountSearch) filteredAccounts = filteredAccounts.filter(a =>
     (a.handle||"").toLowerCase().includes(sf.accountSearch.toLowerCase()) ||
     (a.niche||"").toLowerCase().includes(sf.accountSearch.toLowerCase()) ||
@@ -2810,9 +2816,7 @@ function renderSwipe() {
   let filteredInspo = state.swipeInspo.filter(modelFilter);
   if (sf.platforms.length) filteredInspo = filteredInspo.filter(p => sf.platforms.includes(p.platform));
   if (sf.postTypes.length) filteredInspo = filteredInspo.filter(p => sf.postTypes.includes(p.postType));
-  if (sf.modelIds.length) filteredInspo = filteredInspo.filter(p =>
-    (p.modelIds||["all"]).some(id => id==="all" || sf.modelIds.includes(id))
-  );
+  if (sf.accountHandles.length) filteredInspo = filteredInspo.filter(p => sf.accountHandles.includes(p.account));
   if (sf.inspoSearch) filteredInspo = filteredInspo.filter(p =>
     (p.account||"").toLowerCase().includes(sf.inspoSearch.toLowerCase()) ||
     (p.caption||"").toLowerCase().includes(sf.inspoSearch.toLowerCase()) ||
@@ -2862,15 +2866,11 @@ function renderSwipe() {
   // Platform filter (multi-select pills)
   toolbar.appendChild(renderMultiSelect("Platform", state.platforms.map(p=>({id:p.name,label:p.name,color:p.color})), sf.platforms, v=>setState({swipeFilters:{...sf,platforms:v}})));
 
-  // Post type filter (inspo only)
+  // Post type + Account filters (inspo only)
   if (state.swipeSection === "inspo") {
     toolbar.appendChild(renderMultiSelect("Type", state.postTypes.map(t=>({id:t.id,label:t.name})), sf.postTypes, v=>setState({swipeFilters:{...sf,postTypes:v}})));
-  }
-
-  // Model filter
-  const swipeModels = state.models.filter(m=>m.id!=="all");
-  if (swipeModels.length) {
-    toolbar.appendChild(renderMultiSelect("Model", swipeModels.map(m=>({id:m.id,label:m.label})), sf.modelIds, v=>setState({swipeFilters:{...sf,modelIds:v}})));
+    const inspoAccOpts = [...new Map(state.swipeAccounts.map(a=>[a.handle,{id:a.handle,label:a.handle}])).values()];
+    if (inspoAccOpts.length) toolbar.appendChild(renderMultiSelect("Account", inspoAccOpts, sf.accountHandles, v=>setState({swipeFilters:{...sf,accountHandles:v}})));
   }
 
   // Sort — right-aligned, "Sort: Date ▼" style matching Posts view
@@ -2996,6 +2996,11 @@ function renderSwipe() {
         card.appendChild(el("div",{style:{fontSize:"10px",color:"#15803d",fontFamily:"monospace",marginBottom:"4px"}},"ER: "+er));
         if (p.notes) card.appendChild(el("div",{style:{fontSize:"10px",color:"#9ca3af",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}},p.notes));
         if (p.lastUpdated) card.appendChild(el("div",{style:{fontSize:"9px",color:"#9ca3af",fontFamily:"monospace",marginTop:"4px"}},new Date(p.lastUpdated).toLocaleDateString()));
+        if (p.postLink) {
+          const openBtn = el("button",{style:{marginTop:"6px",width:"100%",padding:"4px",border:"1px solid #e5e7eb",borderRadius:"6px",background:"#fff",fontSize:"10px",cursor:"pointer",color:"#374151",display:"flex",alignItems:"center",justifyContent:"center",gap:"4px"}},"Open Post ↗");
+          openBtn.addEventListener("click",e=>{e.stopPropagation();window.open(p.postLink,"_blank");});
+          card.appendChild(openBtn);
+        }
 
         grid.appendChild(card);
       });
@@ -3051,7 +3056,8 @@ function renderSwipe() {
     picFileInp.accept="image/*";
     picFileInp.addEventListener("change",async()=>{
       const file = picFileInp.files[0]; if (!file) return;
-      const result = await driveUploadFile(file, file.name, SWIPE_ACCOUNTS_FOLDER_ID);
+      const accFolder = await getOrCreateSubfolder(SWIPE_ACCOUNTS_FOLDER_ID, a.handle||a.id);
+      const result = await driveUploadFile(file, file.name, accFolder);
       if (result.id) {
         const updated = {...a, profilePicDriveId:result.id, lastUpdated:new Date().toISOString()};
         setState({swipeAccounts:state.swipeAccounts.map(x=>x.id===a.id?updated:x), swipeAccountDetail:updated});
@@ -3249,15 +3255,14 @@ function renderSwipe() {
 
     // Profile picture upload
     modal.appendChild(el("span",{class:"lbl"},"PROFILE PICTURE"));
-    let newAccPicId = null;
+    let newAccPicFile = null;
     const newAccPicStatus = el("div",{style:{fontSize:"11px",color:"#9ca3af",fontFamily:"monospace",marginBottom:"8px"}});
     const newAccPicInp = el("input",{type:"file",style:{display:"none"}});
     newAccPicInp.accept="image/*";
-    newAccPicInp.addEventListener("change",async()=>{
+    newAccPicInp.addEventListener("change",()=>{
       const file = newAccPicInp.files[0]; if(!file) return;
-      newAccPicStatus.textContent="Uploading...";
-      const result = await driveUploadFile(file, file.name, SWIPE_ACCOUNTS_FOLDER_ID);
-      if(result.id){newAccPicId=result.id; newAccPicStatus.textContent="Photo ready.";}
+      newAccPicFile = file;
+      newAccPicStatus.textContent="Photo selected.";
     });
     const picUploadRow = div("",{display:"flex",gap:"8px",alignItems:"center",marginBottom:"10px"});
     picUploadRow.appendChild(renderBtn("Upload Photo",false,()=>newAccPicInp.click(),{fontSize:"11px"}));
@@ -3265,14 +3270,23 @@ function renderSwipe() {
     modal.appendChild(picUploadRow);
     modal.appendChild(newAccPicInp);
 
-    const saveBtn = renderBtn("Save Account", true, ()=>{
+    const saveBtn = renderBtn("Save Account", true, async ()=>{
+      saveBtn.disabled=true;
+      const handle = fields.handle.value||"";
+      let profilePicDriveId="";
+      if (newAccPicFile && isAuthenticated()) {
+        newAccPicStatus.textContent="Uploading photo...";
+        const accFolder = await getOrCreateSubfolder(SWIPE_ACCOUNTS_FOLDER_ID, handle||"new-account");
+        const res = await driveUploadFile(newAccPicFile, newAccPicFile.name, accFolder);
+        if(res.id) profilePicDriveId=res.id;
+      }
       const newAcc = {
-        id:"sw"+Date.now(), platform:fields.platform.value||"", handle:fields.handle.value||"",
+        id:"sw"+Date.now(), platform:fields.platform.value||"", handle,
         profileLink:fields.profileLink.value||"", followers:parseInt(fields.followers.value)||0,
         posts:parseInt(fields.posts.value)||0, following:parseInt(fields.following.value)||0,
         likes:parseInt(fields.likes.value)||0, niche:fields.niche.value||"",
         whyGood:fields.whyGood.value||"", notes:fields.notes.value||"",
-        modelIds:["all"], profilePicDriveId:newAccPicId||"", lastUpdated:new Date().toISOString(),
+        modelIds:["all"], profilePicDriveId, lastUpdated:new Date().toISOString(),
       };
       setState({swipeAccounts:[...state.swipeAccounts,newAcc], swipeShowNewAccount:false});
       if(isAuthenticated()) saveToSheets();
@@ -3695,7 +3709,9 @@ function renderSettings() {
     mPicInp.accept="image/*";
     mPicInp.addEventListener("change",async()=>{
       const file = mPicInp.files[0]; if(!file) return;
-      const result = await driveUploadFile(file, file.name, MODELS_FOLDER_ID);
+      let pfpFolder = MODELS_FOLDER_ID;
+      if (m.driveFolderId) pfpFolder = await getOrCreateSubfolder(m.driveFolderId, "05 - Content Studio PFP");
+      const result = await driveUploadFile(file, file.name, pfpFolder);
       if(result.id) {
         setState({models:state.models.map(x=>x.id===m.id?{...x,picDriveId:result.id}:x)});
         if(isAuthenticated()) saveToSheets();
@@ -3724,7 +3740,10 @@ function renderSettings() {
     if (isAuthenticated()) saveToSheets();
     // Create Drive folder
     if (isAuthenticated()) createModelInDrive(v).then(result=>{
-      if(result) console.log("Created Drive folder:",result.folderName);
+      if(result?.folderId) {
+        setState({models:state.models.map(m=>m.id===id?{...m,driveFolderId:result.folderId}:m)});
+        saveToSheets();
+      }
     });
   });
   modelAddRow.appendChild(modelInp);
@@ -3824,7 +3843,13 @@ function renderEditAccountModal(account) {
   editPicInp.accept="image/*";
   editPicInp.addEventListener("change",async()=>{
     const file = editPicInp.files[0]; if(!file) return;
-    const result = await driveUploadFile(file, file.name, CONTENT_STUDIO_FOLDER_ID);
+    let uploadFolder = CONTENT_STUDIO_FOLDER_ID;
+    const linkedModel = state.models.find(m=>m.id===form.modelId);
+    if (linkedModel?.driveFolderId) {
+      const accRootFolder = await getOrCreateSubfolder(linkedModel.driveFolderId, "06 - Accounts");
+      uploadFolder = await getOrCreateSubfolder(accRootFolder, form.handle||form.sub||form.id);
+    }
+    const result = await driveUploadFile(file, file.name, uploadFolder);
     if(result.id) { form.picDriveId=result.id; setState({accounts:state.accounts.map(a=>a.id===form.id?{...a,picDriveId:result.id}:a)}); if(isAuthenticated()) saveToSheets(); }
   });
   editPicRow.appendChild(renderBtn(form.picDriveId?"Change Photo":"Upload Photo", false, ()=>editPicInp.click(), {fontSize:"11px"}));
@@ -3902,8 +3927,11 @@ function renderAddAccountModal() {
   addPicInp.accept="image/*";
   addPicInp.addEventListener("change",async()=>{
     const file = addPicInp.files[0]; if(!file) return;
-    const result = await driveUploadFile(file, file.name, CONTENT_STUDIO_FOLDER_ID);
-    if(result.id) { form.picDriveId=result.id; const img=el("img",{style:{width:"100%",height:"100%",objectFit:"cover"}}); setThumbSrc(img,result.id); addPicPreview.innerHTML=""; addPicPreview.appendChild(img); }
+    // upload destination determined on change; final account handle may not be filled yet so we store and re-use at save time
+    form._picFile = file;
+    const img = el("img",{style:{width:"100%",height:"100%",objectFit:"cover"}});
+    img.src = URL.createObjectURL(file);
+    addPicPreview.innerHTML=""; addPicPreview.appendChild(img);
   });
   addPicRow.appendChild(renderBtn("Upload Photo", false, ()=>addPicInp.click(), {fontSize:"11px"}));
   addPicRow.appendChild(addPicInp);
@@ -3930,13 +3958,26 @@ function renderAddAccountModal() {
   platRow.appendChild(platSel);
   modal.appendChild(platRow);
 
-  const saveBtn = renderBtn("Add Account", true, ()=>{
+  const saveBtn = renderBtn("Add Account", true, async ()=>{
     form.followers=parseInt(fields.followers.value)||0;
     form.sub=fields.sub.value;
     form.handle=fields.handle.value;
     form.profileLink=fields.profileLink.value||"";
     if (!form.sub||!form.handle) return;
-    const newAcc = {...form, id:"acc-"+Date.now(), picDriveId:form.picDriveId||""};
+    saveBtn.disabled=true;
+    let picDriveId="";
+    if (form._picFile && isAuthenticated()) {
+      let uploadFolder = CONTENT_STUDIO_FOLDER_ID;
+      const linkedModel = state.models.find(m=>m.id===form.modelId);
+      if (linkedModel?.driveFolderId) {
+        const accRootFolder = await getOrCreateSubfolder(linkedModel.driveFolderId, "06 - Accounts");
+        uploadFolder = await getOrCreateSubfolder(accRootFolder, form.handle||form.sub);
+      }
+      const res = await driveUploadFile(form._picFile, form._picFile.name, uploadFolder);
+      if(res.id) picDriveId=res.id;
+    }
+    const newAcc = {...form, id:"acc-"+Date.now(), picDriveId};
+    delete newAcc._picFile;
     setState({accounts:[...state.accounts,newAcc],showAddAccount:false});
     if (isAuthenticated()) saveToSheets();
   }, {width:"100%",justifyContent:"center",marginTop:"6px"});
