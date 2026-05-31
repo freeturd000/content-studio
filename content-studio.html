@@ -356,11 +356,12 @@ async function sheetsGet(range) {
 }
 
 async function sheetsSet(range, values) {
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, {
+  const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`, {
     method: "PUT",
     headers: {Authorization: "Bearer " + state.token, "Content-Type": "application/json"},
     body: JSON.stringify({values})
   });
+  if (!r.ok) { const t = await r.text(); throw new Error("sheetsSet "+range+": "+r.status+" "+t); }
 }
 
 async function sheetsClear(range) {
@@ -2358,8 +2359,8 @@ function openMetricsLightbox(contentItems, startIdx, draft) {
   box.appendChild(counter);
 
   // Image area
-  const imgWrap = div("",{flex:1,minHeight:0,borderRadius:"10px",background:"#2c2c2e",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:"10px"});
-  const imgEl = el("img",{style:{width:"100%",height:"100%",objectFit:"contain",display:"block"}});
+  const imgWrap = div("",{flex:1,minHeight:0,borderRadius:"10px",background:"#2c2c2e",overflow:"hidden",position:"relative",marginBottom:"10px"});
+  const imgEl = el("img",{style:{position:"absolute",top:0,left:0,width:"100%",height:"100%",objectFit:"contain"}});
   imgWrap.appendChild(imgEl);
   box.appendChild(imgWrap);
 
