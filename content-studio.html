@@ -331,6 +331,7 @@ function connectGoogle() {
 
   // Store state so we can restore after redirect
   localStorage.setItem("cs_pre_auth_tab", state.tab);
+  localStorage.setItem("cs_active_tab", state.tab);
 
   // Redirect in same window (more reliable than popup for GitHub Pages)
   window.location.href = authUrl;
@@ -349,8 +350,9 @@ function checkAuthCallback() {
     state.token = token;
     state.tokenExpiry = expiry;
     state.syncError = null;
-    const savedTab = localStorage.getItem("cs_pre_auth_tab") || "library";
+    const savedTab = localStorage.getItem("cs_pre_auth_tab") || localStorage.getItem("cs_active_tab") || "library";
     state.tab = savedTab;
+    state.mobileTab = savedTab;
     localStorage.removeItem("cs_pre_auth_tab");
     render();
     loadFromSheets();
@@ -4641,7 +4643,7 @@ window.addEventListener("beforeinstallprompt", e => {
     state.tokenExpiry= expiry;
   }
   const savedTab = localStorage.getItem("cs_active_tab");
-  if (savedTab) state.tab = savedTab;
+  if (savedTab) { state.tab = savedTab; state.mobileTab = savedTab; }
 })();
 checkAuthCallback();
 render();
