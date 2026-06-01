@@ -208,7 +208,7 @@ let state = {
   fetchThumbProgress: "",
 
   // draft form
-  draftForm: {platform:state.platforms[0]?.name||"",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},
+  draftForm: {platform:"",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},
   draftNameOverridden: false,
 };
 
@@ -493,8 +493,9 @@ async function loadFromSheets() {
     state.draftPickerSearch = _ps;
     state.draftPickerFolder = _pf;
     state.draftPickerSfw    = _pw;
-    // Fix draftForm.accountId if it doesn't match any loaded account
+    // Fix draftForm platform/accountId once data loads
     if (!state.draftNameOverridden) {
+      if (!state.draftForm.platform && platforms.length) state.draftForm.platform = platforms[0].name;
       const validAcc = accounts.find(a=>a.id===state.draftForm.accountId);
       if (!validAcc) {
         const platAccs = accounts.filter(a=>a.platform===state.draftForm.platform&&a.status==="active");
