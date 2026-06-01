@@ -208,7 +208,7 @@ let state = {
   fetchThumbProgress: "",
 
   // draft form
-  draftForm: {platform:"Instagram",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},
+  draftForm: {platform:state.platforms[0]?.name||"",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},
   draftNameOverridden: false,
 };
 
@@ -286,12 +286,20 @@ function folderPath(folderId) {
   return parts.join(" > ");
 }
 
+function platAbbrev(platformName) {
+  if (!platformName) return "XX";
+  // Use up to 2 uppercase letters: first letters of each word, or first 2 chars
+  const words = platformName.trim().split(/\s+/);
+  if (words.length >= 2) return (words[0][0]+words[1][0]).toUpperCase();
+  return platformName.slice(0,2).toUpperCase();
+}
+
 function autoName(platform, accountId, type, date, order) {
   if (!accountId || !state.accounts.length) return ""; // return empty if not ready
   const acc = state.accounts.find(a=>a.id===accountId);
   if (!acc) return ""; // return empty if account not found yet
   const accLabel = acc.sub.replace(/\s+/g,"-");
-  const platCode = platform === "Instagram" ? "IG" : "TT";
+  const platCode = platAbbrev(platform);
   const d = date ? date.slice(0,10).replace(/-/g,"") : "00000000";
   return platCode+"_"+accLabel+"_"+type+"_"+String(order).padStart(3,"0")+"_"+d;
 }
@@ -1205,7 +1213,8 @@ function renderSidebar() {
   accHeader.appendChild(addAccBtn);
   accWrap.appendChild(accHeader);
 
-  state.accounts.forEach(a => {
+  const sidebarAccounts = state.model === "all" ? state.accounts : state.accounts.filter(a => a.modelId === state.model);
+  sidebarAccounts.forEach(a => {
     const row = div("", {display:"flex",alignItems:"center",gap:"7px",padding:"5px 8px",borderRadius:"7px",cursor:"pointer",marginBottom:"2px",background:"rgba(255,255,255,0.03)"});
     row.addEventListener("mouseenter", () => row.style.background="rgba(255,255,255,0.08)");
     row.addEventListener("mouseleave", () => row.style.background="rgba(255,255,255,0.03)");
@@ -1834,7 +1843,7 @@ function renderDraft() {
     const editBanner = div("",{background:"#eff6ff",color:"#1d4ed8",borderRadius:"8px",padding:"8px 14px",marginBottom:"12px",fontSize:"12px",display:"flex",alignItems:"center",justifyContent:"space-between"});
     editBanner.appendChild(txt("Editing draft"));
     const cancelEdit = el("button",{style:{border:"none",background:"transparent",cursor:"pointer",color:"#1d4ed8",fontSize:"12px"}},"Cancel");
-    cancelEdit.addEventListener("click", () => setState({editingDraft:null, draftForm:{platform:"Instagram",accountId:"ig-main",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"}, draftNameOverridden:false}));
+    cancelEdit.addEventListener("click", () => setState({editingDraft:null, draftForm:{platform:state.platforms[0]?.name||"",accountId:"ig-main",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"}, draftNameOverridden:false}));
     editBanner.appendChild(cancelEdit);
     formArea.appendChild(editBanner);
   }
@@ -1859,7 +1868,8 @@ function renderDraft() {
   platWrap.appendChild(el("span",{class:"lbl"},"PLATFORM"));
   const platSel = renderSel(f.platform, state.platforms.map(p=>({value:p.name,label:p.name})), v => {
     state.draftForm.platform=v;
-    state.draftForm.accountId = state.accounts.find(a=>a.platform===v&&a.status==="active")?.id||"";
+    const _ma = state.model === "all" ? state.accounts : state.accounts.filter(a=>a.modelId===state.model);
+    state.draftForm.accountId = _ma.find(a=>a.platform===v&&a.status==="active")?.id||"";
     if (!state.draftNameOverridden) updateDraftName();
     render();
   });
@@ -1868,7 +1878,8 @@ function renderDraft() {
 
   const accWrap2 = div("",{});
   accWrap2.appendChild(el("span",{class:"lbl"},"ACCOUNT"));
-  const platAccs = state.accounts.filter(a=>a.platform===f.platform&&a.status==="active");
+  const _modelAccs = state.model === "all" ? state.accounts : state.accounts.filter(a=>a.modelId===state.model);
+  const platAccs = _modelAccs.filter(a=>a.platform===f.platform&&a.status==="active");
   const accSel2 = renderSel(f.accountId, platAccs.map(a=>({value:a.id,label:a.sub+" - "+a.handle})), v => { state.draftForm.accountId=v; if(!state.draftNameOverridden) updateDraftName(); render(); });
   accWrap2.appendChild(accSel2);
   accGrid.appendChild(accWrap2);
@@ -2135,11 +2146,11 @@ function renderDraft() {
         return {...c, posts:(c.posts||[]).filter(p=>p.accountId!==draft.accountId||p.date!==state.editingDraft.scheduledAt?.slice(0,10))};
       });
     }
-    setState({drafts:newDrafts, content:newContent, editingDraft:null, draftForm:{platform:"Instagram",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"}, draftNameOverridden:false});
+    setState({drafts:newDrafts, content:newContent, editingDraft:null, draftForm:{platform:state.platforms[0]?.name||"",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"}, draftNameOverridden:false});
     if (isAuthenticated()) saveToSheets();
   }, {flex:1,justifyContent:"center"});
   const clearBtn = renderBtn(isEdit?"Cancel":"Clear", false, () => {
-    setState({editingDraft:null, draftForm:{platform:"Instagram",accountId:"ig-main",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"}, draftNameOverridden:false});
+    setState({editingDraft:null, draftForm:{platform:state.platforms[0]?.name||"",accountId:"ig-main",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"}, draftNameOverridden:false});
   }, {flex:1,justifyContent:"center"});
   btnRow.appendChild(saveBtn);
   btnRow.appendChild(clearBtn);
@@ -3847,7 +3858,7 @@ function renderEditAccountModal(account) {
     const linkedModel = state.models.find(m=>m.id===form.modelId);
     if (linkedModel?.driveFolderId) {
       const accRootFolder = await getOrCreateSubfolder(linkedModel.driveFolderId, "06 - Accounts");
-      uploadFolder = await getOrCreateSubfolder(accRootFolder, form.handle||form.sub||form.id);
+      uploadFolder = await getOrCreateSubfolder(accRootFolder, (form.platform?form.platform+" - ":"")+"@"+(form.handle||form.sub||form.id).replace(/^@/,""));
     }
     const result = await driveUploadFile(file, file.name, uploadFolder);
     if(result.id) { form.picDriveId=result.id; setState({accounts:state.accounts.map(a=>a.id===form.id?{...a,picDriveId:result.id}:a)}); if(isAuthenticated()) saveToSheets(); }
@@ -3958,6 +3969,12 @@ function renderAddAccountModal() {
   platRow.appendChild(platSel);
   modal.appendChild(platRow);
 
+  const modelRow = div("",{marginBottom:"16px"});
+  modelRow.appendChild(el("span",{class:"lbl"},"MODEL"));
+  const modelSel = renderSel(form.modelId, [{value:"",label:"— Unassigned —"}, ...state.models.map(m=>({value:m.id,label:m.label}))], v=>{form.modelId=v;});
+  modelRow.appendChild(modelSel);
+  modal.appendChild(modelRow);
+
   const saveBtn = renderBtn("Add Account", true, async ()=>{
     form.followers=parseInt(fields.followers.value)||0;
     form.sub=fields.sub.value;
@@ -3971,7 +3988,7 @@ function renderAddAccountModal() {
       const linkedModel = state.models.find(m=>m.id===form.modelId);
       if (linkedModel?.driveFolderId) {
         const accRootFolder = await getOrCreateSubfolder(linkedModel.driveFolderId, "06 - Accounts");
-        uploadFolder = await getOrCreateSubfolder(accRootFolder, form.handle||form.sub);
+        uploadFolder = await getOrCreateSubfolder(accRootFolder, (form.platform?form.platform+" - ":"")+"@"+(form.handle||form.sub).replace(/^@/,""));
       }
       const res = await driveUploadFile(form._picFile, form._picFile.name, uploadFolder);
       if(res.id) picDriveId=res.id;
@@ -4261,14 +4278,16 @@ function renderMobileDraftForm() {
   accCard2.appendChild(lbl("PLATFORM"));
   accCard2.appendChild(sel(f.platform, state.platforms.map(p=>({value:p.name,label:p.name})), v=>{
     state.draftForm.platform=v;
-    const pla=state.accounts.find(a=>a.platform===v&&a.status==="active");
+    const _mam = state.model === "all" ? state.accounts : state.accounts.filter(a=>a.modelId===state.model);
+    const pla=_mam.find(a=>a.platform===v&&a.status==="active");
     state.draftForm.accountId=pla?.id||"";
     if(!state.draftNameOverridden) updateDraftName();
     render();
   }));
   accCard2.appendChild(el("div",{style:{height:"8px"}}));
   accCard2.appendChild(lbl("ACCOUNT"));
-  const platAccsM = state.accounts.filter(a=>a.platform===f.platform&&a.status==="active");
+  const _modelAccsM = state.model === "all" ? state.accounts : state.accounts.filter(a=>a.modelId===state.model);
+  const platAccsM = _modelAccsM.filter(a=>a.platform===f.platform&&a.status==="active");
   accCard2.appendChild(sel(f.accountId, platAccsM.map(a=>({value:a.id,label:a.sub+" — "+a.handle})), v=>{state.draftForm.accountId=v;if(!state.draftNameOverridden)updateDraftName();render();}));
   accCard2.appendChild(el("div",{style:{height:"8px"}}));
   accCard2.appendChild(lbl("TYPE"));
@@ -4397,12 +4416,12 @@ function renderMobileDraftForm() {
         return {...c,posts:[...(c.posts||[]),{accountId:draft.accountId,date:draft.scheduledAt?.slice(0,10)||"",postName:draft.name||"",views:0,likes:0,comments:0}]};
       });
     }
-    setState({drafts:newDrafts,content:newContent,editingDraft:null,draftForm:{platform:"Instagram",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},draftNameOverridden:false});
+    setState({drafts:newDrafts,content:newContent,editingDraft:null,draftForm:{platform:state.platforms[0]?.name||"",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},draftNameOverridden:false});
     if(isAuthenticated()) saveToSheets();
   });
   const clearB2=el("button",{style:{flex:1,padding:"12px",border:"1px solid "+(state.darkMode?"#3a3a3c":"#e5e7eb"),borderRadius:"10px",background:"transparent",color:state.darkMode?"#aeaeb2":"#6b7280",fontSize:"14px",cursor:"pointer",minHeight:"48px"}},isEdit2?"Cancel":"Clear");
   clearB2.addEventListener("click",()=>{
-    setState({editingDraft:null,draftForm:{platform:"Instagram",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},draftNameOverridden:false});
+    setState({editingDraft:null,draftForm:{platform:state.platforms[0]?.name||"",accountId:"",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},draftNameOverridden:false});
   });
   btnRow2.appendChild(saveB2);
   btnRow2.appendChild(clearB2);
@@ -4857,7 +4876,7 @@ function renderApp() {
 
   const topBtns = div("",{display:"flex",gap:"8px"});
   const uploadBtn = renderBtn("Quick Upload", false, ()=>setState({showUpload:true}));
-  const draftBtn  = renderBtn("+ Draft Post", true, ()=>setState({tab:"draft",editingDraft:null,draftForm:{platform:"Instagram",accountId:"ig-main",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},draftNameOverridden:false}));
+  const draftBtn  = renderBtn("+ Draft Post", true, ()=>setState({tab:"draft",editingDraft:null,draftForm:{platform:state.platforms[0]?.name||"",accountId:"ig-main",type:"Story",contentIds:[],overlays:{},caption:"",hashtags:"",scheduledAt:"",name:"",status:"draft"},draftNameOverridden:false}));
   topBtns.appendChild(uploadBtn);
   topBtns.appendChild(draftBtn);
   topbar.appendChild(topBtns);
